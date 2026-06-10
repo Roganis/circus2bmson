@@ -27,8 +27,10 @@ positions for hand-charting. Speed and tempo are folded into bmson `bpm_events`
 - [x] **M0** — CMake project (library + CLI + tools), vendored deps, Linux CI.
 - [x] **M0.5** — de-risk the stem approach: prove per-channel renders sum back
       to the full mix (`tools/stem_sum_check`, gated in CI).
-- [ ] **M1** — timeline: flatten orders, build the note grid, `bpm_events`,
-      `lines`; `--max-loops` for backward jumps.
+- [x] **M1** — timeline: direct MOD parser + sequencer that flattens orders
+      (`Bxx`/`Dxx`/`E6x`, `--max-loops`), builds the note grid, `bpm_events` and
+      `lines`, and emits a bmson skeleton (notes on lane 0, provisional
+      keysounds). Timing is cross-checked against libopenmpt's duration in CI.
 - [ ] **M2** — render per-channel stems, slice + content-hash dedup into stereo
       WAV keysounds (panning baked in).
 - [ ] **M3** — emit the bmson document + WAV folder; validate in beatoraja.
@@ -49,7 +51,14 @@ ctest --test-dir build --output-on-failure
 `nlohmann/json` and `dr_wav` are vendored under `third_party/`, so libopenmpt
 is the only external dependency.
 
-### Try the spike
+### Convert (M1: skeleton, no audio yet)
+
+```sh
+./build/cli/circus2bmson tests/fixtures/10k_reggae_dub.mod -o out
+# writes out/10k_reggae_dub.bmson (notes on the BGM lane, provisional keysounds)
+```
+
+### Try the de-risking spike
 
 ```sh
 ./build/tools/stem_sum_check tests/fixtures/10k_reggae_dub.mod

@@ -1,7 +1,12 @@
-# Core conversion library. At M0 this is a thin stub; the MOD loader, timeline
-# builder, keysound renderer and bmson emitter land in M1-M3.
+# Core conversion library.
+#   M1: MOD parser + timeline builder + bmson skeleton emitter.
+#   M2/M3 will add keysound rendering (libopenmpt) and the final bmson output.
 add_library(circus2bmson
   version.cpp
+  mod.cpp
+  timeline.cpp
+  bmson.cpp
+  convert.cpp
 )
 add_library(circus2bmson::circus2bmson ALIAS circus2bmson)
 
