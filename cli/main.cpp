@@ -17,7 +17,8 @@ void print_usage(const char* argv0) {
             << "  " << argv0 << " --help\n\n"
             << "options:\n"
             << "  -o, --output DIR    output folder (default: current dir)\n"
-            << "  --max-loops N       times to unroll a looping section (default 1)\n";
+            << "  --max-loops N       times to unroll a looping section (default 1)\n"
+            << "  --no-audio          emit bmson skeleton only (no keysound WAVs)\n";
 }
 
 }  // namespace
@@ -48,6 +49,8 @@ int main(int argc, char** argv) {
         return 2;
       }
       opts.max_loops = std::atoi(argv[i]);
+    } else if (a == "--no-audio") {
+      opts.render_audio = false;
     } else if (!a.empty() && a[0] == '-') {
       std::cerr << "error: unknown option: " << a << "\n";
       return 2;
@@ -73,6 +76,12 @@ int main(int argc, char** argv) {
               << "notes   : " << r.note_count << "\n"
               << "bpm_evts: " << r.bpm_event_count << "\n"
               << "lines   : " << r.line_count << "\n";
+    if (r.audio_rendered)
+      std::cout << "keysound: " << r.keysound_count << " unique  ("
+                << r.total_slices << " note slices)\n";
+    if (r.missing_keysounds > 0)
+      std::cout << "warning : " << r.missing_keysounds
+                << " note(s) had no rendered keysound (alignment)\n";
     if (r.loops_played > 0)
       std::cout << "loops   : " << r.loops_played << " unrolled\n";
     if (r.truncated)

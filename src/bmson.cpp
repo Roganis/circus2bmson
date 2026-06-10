@@ -1,5 +1,6 @@
 #include "circus2bmson/bmson.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <map>
 #include <utility>
@@ -11,7 +12,8 @@ namespace circus2bmson {
 
 using json = nlohmann::ordered_json;
 
-std::string build_bmson_skeleton(const Module& mod, const Timeline& tl) {
+std::string build_bmson(const Module& mod, const Timeline& tl,
+                        const std::vector<SoundChannel>& channels) {
   json doc;
   doc["version"] = "1.0.0";
 
@@ -47,21 +49,14 @@ std::string build_bmson_skeleton(const Module& mod, const Timeline& tl) {
   doc["bpm_events"] = std::move(bpm);
   doc["stop_events"] = json::array();
 
-  // Provisional keysounds: one channel per (sample, period). std::map keeps the
-  // output deterministic (sorted by key); note lists stay in pulse order.
-  std::map<std::pair<int, int>, std::vector<long>> groups;
-  for (const NoteEvent& n : tl.notes)
-    groups[{n.sample, n.period}].push_back(n.pulse);
-
-  json channels = json::array();
-  for (const auto& kv : groups) {
-    char name[32];
-    std::snprintf(name, sizeof(name), "s%02d_p%04d.wav", kv.first.first,
-                  kv.first.second);
+  json sound = json::array();
+  for (const SoundChannel& c : channels) {
+    std::vector<long> pulses = c.note_pulses;
+    std::sort(pulses.begin(), pulses.end());
     json ch;
-    ch["name"] = name;
+    ch["name"] = c.name;
     json notes = json::array();
-    for (long y : kv.second) {
+    for (long y : pulses) {
       json note;
       note["x"] = 0;  // BGM lane
       note["y"] = y;
@@ -70,11 +65,28 @@ std::string build_bmson_skeleton(const Module& mod, const Timeline& tl) {
       notes.push_back(std::move(note));
     }
     ch["notes"] = std::move(notes);
-    channels.push_back(std::move(ch));
+    sound.push_back(std::move(ch));
   }
-  doc["sound_channels"] = std::move(channels);
+  doc["sound_channels"] = std::move(sound);
 
   return doc.dump(2);
+}
+
+std::string build_bmson_skeleton(const Module& mod, const Timeline& tl) {
+  // Provisional keysounds: one channel per (sample, period), names sorted.
+  std::map<std::pair<int, int>, std::vector<long>> groups;
+  for (const NoteEvent& n : tl.notes)
+    groups[{n.sample, n.period}].push_back(n.pulse);
+
+  std::vector<SoundChannel> channels;
+  channels.reserve(groups.size());
+  for (const auto& kv : groups) {
+    char name[32];
+    std::snprintf(name, sizeof(name), "s%02d_p%04d.wav", kv.first.first,
+                  kv.first.second);
+    channels.push_back({name, kv.second});
+  }
+  return build_bmson(mod, tl, channels);
 }
 
 }  // namespace circus2bmson

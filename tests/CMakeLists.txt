@@ -36,3 +36,10 @@ target_compile_definitions(test_convert_vs_libopenmpt PRIVATE
   C2B_FIXTURE_DIR="${C2B_FIXTURE_DIR}"
   C2B_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/test_out")
 add_test(NAME convert_vs_libopenmpt COMMAND test_convert_vs_libopenmpt)
+
+# M2: keysounds, placed back at their onsets, reconstruct the full mix.
+add_executable(test_keysound_fidelity test_keysound_fidelity.cpp)
+target_link_libraries(test_keysound_fidelity PRIVATE circus2bmson::circus2bmson)
+target_compile_definitions(test_keysound_fidelity PRIVATE
+  C2B_FIXTURE_DIR="${C2B_FIXTURE_DIR}")
+add_test(NAME keysound_fidelity COMMAND test_keysound_fidelity)

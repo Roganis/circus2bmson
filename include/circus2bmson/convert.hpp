@@ -9,6 +9,7 @@ namespace circus2bmson {
 struct ConvertOptions {
   int max_loops = 1;
   std::string output_dir = ".";
+  bool render_audio = true;  // false -> M1 skeleton only (fast, no WAVs)
 };
 
 struct ConvertResult {
@@ -25,6 +26,12 @@ struct ConvertResult {
   int loops_played = 0;
   bool truncated = false;
   int unsupported_flow = 0;
+
+  // Audio (when render_audio is true).
+  bool audio_rendered = false;
+  long total_slices = 0;      // note-ons sliced before dedup
+  long keysound_count = 0;    // unique WAVs written
+  long missing_keysounds = 0; // timeline notes with no rendered slice (alignment)
 };
 
 // Convert a MOD file to a bmson skeleton folder (M1: structure only, no audio).

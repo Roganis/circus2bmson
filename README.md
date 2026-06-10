@@ -31,9 +31,12 @@ positions for hand-charting. Speed and tempo are folded into bmson `bpm_events`
       (`Bxx`/`Dxx`/`E6x`, `--max-loops`), builds the note grid, `bpm_events` and
       `lines`, and emits a bmson skeleton (notes on lane 0, provisional
       keysounds). Timing is cross-checked against libopenmpt's duration in CI.
-- [ ] **M2** — render per-channel stems, slice + content-hash dedup into stereo
-      WAV keysounds (panning baked in).
-- [ ] **M3** — emit the bmson document + WAV folder; validate in beatoraja.
+- [x] **M2** — render per-channel stems, slice at note-on times, content-hash
+      dedup into stereo WAV keysounds (pitch/effects/pan baked in), and bind each
+      note to its keysound. A reconstruction test (keysounds replaced at their
+      onsets vs libopenmpt's full mix, ~-80 dB residual) gates fidelity in CI.
+- [ ] **M3** — polish the bmson/folder output and validate in beatoraja
+      (drag into BmsONE; confirm the convert -> chart workflow).
 - [ ] **M4** — refinements: `9xx`/`EDx` sub-row precision, finetune, OGG,
       macOS/Windows CI.
 
@@ -51,11 +54,13 @@ ctest --test-dir build --output-on-failure
 `nlohmann/json` and `dr_wav` are vendored under `third_party/`, so libopenmpt
 is the only external dependency.
 
-### Convert (M1: skeleton, no audio yet)
+### Convert
 
 ```sh
 ./build/cli/circus2bmson tests/fixtures/10k_reggae_dub.mod -o out
-# writes out/10k_reggae_dub.bmson (notes on the BGM lane, provisional keysounds)
+# writes out/10k_reggae_dub.bmson + out/key_*.wav (BGM lane, real keysounds)
+# --no-audio    emit the bmson skeleton only (structure, no WAVs)
+# --max-loops N unroll a looping section N times
 ```
 
 ### Try the de-risking spike

@@ -32,6 +32,7 @@ void check_fixture(const std::string& mod_path, const std::string& out_dir) {
 
   ConvertOptions opts;
   opts.output_dir = out_dir;
+  opts.render_audio = false;  // this test only checks timing + structure
   const ConvertResult r = convert_mod_file(mod_path, opts);
 
   // Our flattened timeline should imply (nearly) the same real-time length.
