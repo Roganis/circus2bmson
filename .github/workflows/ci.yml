@@ -24,3 +24,50 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-libopenmpt
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Bundle exe + runtime DLLs
+        run: |
+          mkdir -p dist
+          cp build/cli/circus2bmson.exe dist/
+          # Copy every MSYS2-provided DLL the exe transitively needs.
+          for d in $(ldd build/cli/circus2bmson.exe | grep -i ucrt64 | awk '{print $3}'); do
+            cp -u "$d" dist/
+          done
+          # Include the sample modules so it can be tried immediately.
+          cp tests/fixtures/*.mod dist/ || true
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: circus2bmson-windows-x64
+          path: dist/
+

@@ -38,7 +38,7 @@ positions for hand-charting. Speed and tempo are folded into bmson `bpm_events`
 - [ ] **M3** — polish the bmson/folder output and validate in beatoraja
       (drag into BmsONE; confirm the convert -> chart workflow).
 - [ ] **M4** — refinements: `9xx`/`EDx` sub-row precision, finetune, OGG,
-      macOS/Windows CI.
+      macOS CI. (Windows CI + prebuilt `.exe` artifact: done.)
 
 ## Building
 
@@ -46,6 +46,7 @@ Requires a C++17 compiler, CMake ≥ 3.16, and libopenmpt.
 
 ```sh
 sudo apt-get install -y libopenmpt-dev cmake ninja-build   # Debian/Ubuntu
+sudo pacman -S --needed libopenmpt cmake ninja gcc          # Arch
 cmake -S . -B build -G Ninja
 cmake --build build
 ctest --test-dir build --output-on-failure
@@ -53,6 +54,22 @@ ctest --test-dir build --output-on-failure
 
 `nlohmann/json` and `dr_wav` are vendored under `third_party/`, so libopenmpt
 is the only external dependency.
+
+### Windows
+
+A prebuilt `circus2bmson.exe` (plus its DLLs and the sample modules) is
+published by CI as the **`circus2bmson-windows-x64`** artifact on each run —
+download it from the Actions tab, no toolchain required.
+
+To build it yourself, use [MSYS2](https://www.msys2.org/) in the **UCRT64**
+shell:
+
+```sh
+pacman -S --needed git mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake \
+  mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-pkgconf \
+  mingw-w64-ucrt-x86_64-libopenmpt
+cmake -S . -B build -G Ninja && cmake --build build
+```
 
 ### Convert
 
