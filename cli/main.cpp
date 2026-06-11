@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <string>
 
@@ -16,7 +17,7 @@ void print_usage(const char* argv0) {
             << "  " << argv0 << " --version\n"
             << "  " << argv0 << " --help\n\n"
             << "options:\n"
-            << "  -o, --output DIR    output folder (default: current dir)\n"
+            << "  -o, --output DIR    output folder (default: a folder named after the input)\n"
             << "  --max-loops N       times to unroll a looping section (default 1)\n"
             << "  --name-by WHICH     keysound names: channel (default) | instrument | lane\n"
             << "  --volume-ramping    keep libopenmpt's anti-click ramp (more keysounds)\n"
@@ -28,6 +29,7 @@ void print_usage(const char* argv0) {
 int main(int argc, char** argv) {
   std::string input;
   circus2bmson::ConvertOptions opts;
+  bool output_given = false;
 
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -45,6 +47,7 @@ int main(int argc, char** argv) {
         return 2;
       }
       opts.output_dir = argv[i];
+      output_given = true;
     } else if (a == "--max-loops") {
       if (++i >= argc) {
         std::cerr << "error: missing argument for " << a << "\n";
@@ -82,6 +85,13 @@ int main(int argc, char** argv) {
   if (input.empty()) {
     print_usage(argv[0]);
     return 2;
+  }
+
+  // With no -o (e.g. dragging a .mod onto the executable), write to a folder
+  // named after the module, beside it.
+  if (!output_given) {
+    const std::filesystem::path in(input);
+    opts.output_dir = (in.parent_path() / in.stem()).string();
   }
 
   try {

@@ -75,7 +75,15 @@ cmake -S . -B build -G Ninja && cmake --build build
 
 ```sh
 ./build/cli/circus2bmson tests/fixtures/10k_reggae_dub.mod -o out
-# writes out/10k_reggae_dub.bmson + descriptive keysound WAVs (BGM lane)
+# writes out/10k_reggae_dub.bmson + keysound WAVs (BGM lane)
+```
+
+With no `-o`, output goes to a folder named after the module, beside it — so on
+Windows you can just **drag a `.mod` onto `circus2bmson.exe`** and get a
+`song/song.bmson` folder next to the file. Other options:
+
+```sh
+# circus2bmson <input.mod> [-o DIR] [options]
 # --name-by channel     channel1_001.wav       (default; simple, per channel)
 # --name-by instrument  s05_bass_ch01_A-2.wav  (descriptive, group by sample)
 # --name-by lane        ch01_s05_bass_A-2.wav  (descriptive, group by channel)
