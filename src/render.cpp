@@ -223,6 +223,7 @@ RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes_u8,
   rr.marker_rows = static_cast<long>(markers.size());
   std::unordered_map<std::string, int> dedup;  // raw PCM bytes -> keysound id
   std::set<std::string> used_names;             // keep filenames unique
+  std::vector<int> chan_seq(mod.channels, 0);   // per-channel counter (Channel)
 
   for (int c = 0; c < mod.channels; ++c) {
     const std::vector<float> stem =
@@ -265,8 +266,14 @@ RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes_u8,
       int id;
       if (found == dedup.end()) {
         id = static_cast<int>(rr.keysound_names.size());
-        const std::string base =
-            keysound_base(mod, naming, open_sample, c, open_period);
+        std::string base;
+        if (naming == KeysoundNaming::Channel) {
+          char b[24];
+          std::snprintf(b, sizeof(b), "channel%d_%03d", c + 1, ++chan_seq[c]);
+          base = b;
+        } else {
+          base = keysound_base(mod, naming, open_sample, c, open_period);
+        }
         std::string name = base + ".wav";
         for (int k = 2; used_names.count(name); ++k)
           name = base + "_" + std::to_string(k) + ".wav";

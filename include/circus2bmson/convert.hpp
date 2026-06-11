@@ -12,7 +12,7 @@ struct ConvertOptions {
   int max_loops = 1;
   std::string output_dir = ".";
   bool render_audio = true;  // false -> M1 skeleton only (fast, no WAVs)
-  KeysoundNaming keysound_naming = KeysoundNaming::Instrument;
+  KeysoundNaming keysound_naming = KeysoundNaming::Channel;
   bool volume_ramping = false;  // true -> libopenmpt smoothing (fewer dupes off)
 };
 

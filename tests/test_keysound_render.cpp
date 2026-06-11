@@ -72,5 +72,14 @@ int main() {
     CHECK_MSG(n.rfind("ch", 0) == 0, "lane name should start with 'ch': '%s'",
               n.c_str());
 
+  // Channel naming (the default): simple, unique, channel-grouped names.
+  const RenderResult rc =
+      render_keysounds(bytes, mod, out, KeysoundNaming::Channel);
+  std::set<std::string> cuniq(rc.keysound_names.begin(), rc.keysound_names.end());
+  CHECK(cuniq.size() == rc.keysound_names.size());
+  for (const std::string& n : rc.keysound_names)
+    CHECK_MSG(n.rfind("channel", 0) == 0,
+              "channel name should start with 'channel': '%s'", n.c_str());
+
   REPORT_AND_RETURN();
 }

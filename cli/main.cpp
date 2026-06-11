@@ -18,7 +18,7 @@ void print_usage(const char* argv0) {
             << "options:\n"
             << "  -o, --output DIR    output folder (default: current dir)\n"
             << "  --max-loops N       times to unroll a looping section (default 1)\n"
-            << "  --name-by WHICH     keysound names: instrument (default) | lane\n"
+            << "  --name-by WHICH     keysound names: channel (default) | instrument | lane\n"
             << "  --volume-ramping    keep libopenmpt's anti-click ramp (more keysounds)\n"
             << "  --no-audio          emit bmson skeleton only (no keysound WAVs)\n";
 }
@@ -57,12 +57,14 @@ int main(int argc, char** argv) {
         return 2;
       }
       const std::string which = argv[i];
-      if (which == "instrument") {
+      if (which == "channel") {
+        opts.keysound_naming = circus2bmson::KeysoundNaming::Channel;
+      } else if (which == "instrument") {
         opts.keysound_naming = circus2bmson::KeysoundNaming::Instrument;
       } else if (which == "lane") {
         opts.keysound_naming = circus2bmson::KeysoundNaming::Lane;
       } else {
-        std::cerr << "error: --name-by expects 'instrument' or 'lane'\n";
+        std::cerr << "error: --name-by expects 'channel', 'instrument' or 'lane'\n";
         return 2;
       }
     } else if (a == "--volume-ramping") {
