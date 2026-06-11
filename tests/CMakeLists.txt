@@ -13,6 +13,14 @@ if(TARGET stem_sum_check)
     COMMAND stem_sum_check
       ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/8bit_castle.mod
       --max-peak 1e-3 --max-rms-db -100)
+  add_test(NAME stem_sum_xm
+    COMMAND stem_sum_check
+      ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/neurosys.xm
+      --max-peak 1e-3 --max-rms-db -100)
+  add_test(NAME stem_sum_it
+    COMMAND stem_sum_check
+      ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/chip_ultimatum.it
+      --max-peak 1e-3 --max-rms-db -100)
 endif()
 
 set(C2B_FIXTURE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
@@ -44,10 +52,17 @@ target_compile_definitions(test_keysound_fidelity PRIVATE
   C2B_FIXTURE_DIR="${C2B_FIXTURE_DIR}")
 add_test(NAME keysound_fidelity COMMAND test_keysound_fidelity)
 
-# M2: render path -- descriptive unique WAV names, every note bound.
+# M2: render path -- naming schemes, WAV/OGG containers, every note bound.
 add_executable(test_keysound_render test_keysound_render.cpp)
 target_link_libraries(test_keysound_render PRIVATE circus2bmson::circus2bmson)
 target_compile_definitions(test_keysound_render PRIVATE
   C2B_FIXTURE_DIR="${C2B_FIXTURE_DIR}"
   C2B_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/test_out")
 add_test(NAME keysound_render COMMAND test_keysound_render)
+
+# Oracle: generic libopenmpt-driven score == independent MOD sequencer.
+add_executable(test_score_vs_timeline test_score_vs_timeline.cpp)
+target_link_libraries(test_score_vs_timeline PRIVATE circus2bmson::circus2bmson)
+target_compile_definitions(test_score_vs_timeline PRIVATE
+  C2B_FIXTURE_DIR="${C2B_FIXTURE_DIR}")
+add_test(NAME score_vs_timeline COMMAND test_score_vs_timeline)

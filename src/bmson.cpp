@@ -12,13 +12,13 @@ namespace circus2bmson {
 
 using json = nlohmann::ordered_json;
 
-std::string build_bmson(const Module& mod, const Timeline& tl,
+std::string build_bmson(const Score& score,
                         const std::vector<SoundChannel>& channels) {
   json doc;
   doc["version"] = "1.0.0";
 
   json info;
-  info["title"] = mod.title;
+  info["title"] = score.title;
   info["subtitle"] = "";
   info["artist"] = "";
   info["subartists"] = json::array();
@@ -27,12 +27,12 @@ std::string build_bmson(const Module& mod, const Timeline& tl,
   info["chart_name"] = "";
   info["judge_rank"] = 100;
   info["total"] = 100;
-  info["init_bpm"] = tl.init_bpm;
-  info["resolution"] = tl.resolution;
+  info["init_bpm"] = score.init_bpm;
+  info["resolution"] = score.resolution;
   doc["info"] = info;
 
   json lines = json::array();
-  for (long y : tl.lines) {
+  for (long y : score.lines) {
     json l;
     l["y"] = y;
     lines.push_back(std::move(l));
@@ -40,7 +40,7 @@ std::string build_bmson(const Module& mod, const Timeline& tl,
   doc["lines"] = std::move(lines);
 
   json bpm = json::array();
-  for (const BpmEvent& e : tl.bpm_events) {
+  for (const BpmEvent& e : score.bpm_events) {
     json b;
     b["y"] = e.pulse;
     b["bpm"] = e.bpm;
@@ -72,21 +72,21 @@ std::string build_bmson(const Module& mod, const Timeline& tl,
   return doc.dump(2);
 }
 
-std::string build_bmson_skeleton(const Module& mod, const Timeline& tl) {
-  // Provisional keysounds: one channel per (sample, period), names sorted.
+std::string build_bmson_skeleton(const Score& score, const std::string& ext) {
+  // Provisional keysounds: one channel per (instrument, note), names sorted.
   std::map<std::pair<int, int>, std::vector<long>> groups;
-  for (const NoteEvent& n : tl.notes)
-    groups[{n.sample, n.period}].push_back(n.pulse);
+  for (const ScoreNote& n : score.notes)
+    groups[{n.instrument, n.note}].push_back(n.pulse);
 
   std::vector<SoundChannel> channels;
   channels.reserve(groups.size());
   for (const auto& kv : groups) {
     char name[32];
-    std::snprintf(name, sizeof(name), "s%02d_p%04d.wav", kv.first.first,
-                  kv.first.second);
+    std::snprintf(name, sizeof(name), "i%02d_n%03d%s", kv.first.first,
+                  kv.first.second, ext.c_str());
     channels.push_back({name, kv.second});
   }
-  return build_bmson(mod, tl, channels);
+  return build_bmson(score, channels);
 }
 
 }  // namespace circus2bmson

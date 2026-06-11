@@ -1,5 +1,5 @@
-// Exercise the keysound render path: descriptive, unique filenames; every
-// timeline note bound to a written WAV.
+// Exercise the keysound render path: unique filenames per naming scheme, valid
+// audio containers (WAV and OGG), and every note bound to a keysound.
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -10,9 +10,8 @@
 #include <vector>
 
 #include "check.hpp"
-#include "circus2bmson/mod.hpp"
 #include "circus2bmson/render.hpp"
-#include "circus2bmson/timeline.hpp"
+#include "circus2bmson/score.hpp"
 
 namespace {
 
@@ -24,12 +23,11 @@ std::vector<std::uint8_t> read_bytes(const std::string& path) {
                                    std::istreambuf_iterator<char>());
 }
 
-bool is_riff_wav(const std::string& path) {
+std::string magic4(const std::string& path) {
   std::ifstream f(path, std::ios::binary);
   char hdr[4] = {0, 0, 0, 0};
   f.read(hdr, 4);
-  f.seekg(0, std::ios::end);
-  return f.good() && std::string(hdr, 4) == "RIFF" && f.tellg() > 44;
+  return std::string(hdr, 4);
 }
 
 }  // namespace
@@ -40,46 +38,48 @@ int main() {
   std::filesystem::create_directories(out);
 
   const std::vector<std::uint8_t> bytes = read_bytes(dir + "/10k_reggae_dub.mod");
-  const Module mod = parse_mod(bytes);
-  const Timeline tl = build_timeline(mod);
+  const Score score = read_score(bytes);
 
-  const RenderResult rr = render_keysounds(bytes, mod, out, KeysoundNaming::Instrument);
-
-  // Names are unique, descriptive, and back real WAV files.
-  std::set<std::string> uniq(rr.keysound_names.begin(), rr.keysound_names.end());
-  CHECK_MSG(uniq.size() == rr.keysound_names.size(), "names=%zu unique=%zu",
-            rr.keysound_names.size(), uniq.size());
-  CHECK(static_cast<long>(rr.keysound_names.size()) == rr.unique_keysounds);
-  for (const std::string& n : rr.keysound_names) {
-    CHECK_MSG(n.size() > 4 && n.substr(n.size() - 4) == ".wav", "name='%s'",
-              n.c_str());
-    CHECK_MSG(n[0] == 's', "instrument name should start with 's': '%s'",
-              n.c_str());
-    CHECK_MSG(is_riff_wav(out + "/" + n), "not a WAV: '%s'", n.c_str());
+  // Default: channel naming, WAV.
+  const RenderResult rc = render_keysounds(bytes, score, out);
+  std::set<std::string> uniq(rc.keysound_names.begin(), rc.keysound_names.end());
+  CHECK_MSG(uniq.size() == rc.keysound_names.size(), "names=%zu unique=%zu",
+            rc.keysound_names.size(), uniq.size());
+  CHECK(static_cast<long>(rc.keysound_names.size()) == rc.unique_keysounds);
+  CHECK_MSG(rc.total_slices == static_cast<long>(score.notes.size()),
+            "slices=%ld notes=%zu", rc.total_slices, score.notes.size());
+  for (const std::string& n : rc.keysound_names) {
+    CHECK_MSG(n.rfind("channel", 0) == 0, "name='%s'", n.c_str());
+    CHECK_MSG(magic4(out + "/" + n) == "RIFF", "not a WAV: '%s'", n.c_str());
   }
+  long unbound = 0;
+  for (int id : rc.note_keysound)
+    if (id < 0) ++unbound;
+  CHECK_MSG(unbound == 0, "unbound notes=%ld", unbound);
 
-  // Every timeline note resolves to a keysound; slice count matches notes.
-  CHECK_MSG(rr.total_slices == static_cast<long>(tl.notes.size()),
-            "slices=%ld notes=%zu", rr.total_slices, tl.notes.size());
-  long missing = 0;
-  for (const NoteEvent& n : tl.notes)
-    if (!rr.note_to_keysound.count(note_key(n.order, n.row, n.channel))) ++missing;
-  CHECK_MSG(missing == 0, "missing=%ld", missing);
-
-  // Lane naming puts the channel first.
-  const RenderResult rl = render_keysounds(bytes, mod, out, KeysoundNaming::Lane);
+  // Instrument / lane naming prefixes.
+  const RenderResult ri =
+      render_keysounds(bytes, score, out, KeysoundNaming::Instrument);
+  for (const std::string& n : ri.keysound_names)
+    CHECK_MSG(n[0] == 's', "instrument name: '%s'", n.c_str());
+  const RenderResult rl =
+      render_keysounds(bytes, score, out, KeysoundNaming::Lane);
   for (const std::string& n : rl.keysound_names)
-    CHECK_MSG(n.rfind("ch", 0) == 0, "lane name should start with 'ch': '%s'",
-              n.c_str());
+    CHECK_MSG(n.rfind("ch", 0) == 0, "lane name: '%s'", n.c_str());
 
-  // Channel naming (the default): simple, unique, channel-grouped names.
-  const RenderResult rc =
-      render_keysounds(bytes, mod, out, KeysoundNaming::Channel);
-  std::set<std::string> cuniq(rc.keysound_names.begin(), rc.keysound_names.end());
-  CHECK(cuniq.size() == rc.keysound_names.size());
-  for (const std::string& n : rc.keysound_names)
-    CHECK_MSG(n.rfind("channel", 0) == 0,
-              "channel name should start with 'channel': '%s'", n.c_str());
+  // OGG output: valid container, same dedup count as WAV.
+  const std::string oggdir = std::string(C2B_TMP_DIR) + "/render_ogg";
+  std::filesystem::create_directories(oggdir);
+  const RenderResult ro =
+      render_keysounds(bytes, score, oggdir, KeysoundNaming::Channel,
+                       /*volume_ramping=*/false, AudioFormat::Ogg);
+  CHECK_MSG(ro.unique_keysounds == rc.unique_keysounds, "ogg=%ld wav=%ld",
+            ro.unique_keysounds, rc.unique_keysounds);
+  for (const std::string& n : ro.keysound_names) {
+    CHECK_MSG(n.size() > 4 && n.substr(n.size() - 4) == ".ogg", "name='%s'",
+              n.c_str());
+    CHECK_MSG(magic4(oggdir + "/" + n) == "OggS", "not an OGG: '%s'", n.c_str());
+  }
 
   REPORT_AND_RETURN();
 }

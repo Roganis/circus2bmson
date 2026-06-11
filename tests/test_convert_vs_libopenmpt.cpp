@@ -82,5 +82,7 @@ int main() {
   const std::string out = C2B_TMP_DIR;
   check_fixture(dir + "/10k_reggae_dub.mod", out);
   check_fixture(dir + "/8bit_castle.mod", out);
+  check_fixture(dir + "/neurosys.xm", out);
+  check_fixture(dir + "/chip_ultimatum.it", out);
   REPORT_AND_RETURN();
 }

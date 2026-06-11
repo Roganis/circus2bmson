@@ -23,6 +23,7 @@ option(C2B_BUILD_TESTS "Enable tests (ctest)"            ON)
 # ---------------------------------------------------------------------------
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBOPENMPT REQUIRED IMPORTED_TARGET libopenmpt)
+pkg_check_modules(VORBISENC REQUIRED IMPORTED_TARGET vorbisenc vorbis ogg)
 
 add_library(c2b_vendor INTERFACE)
 target_include_directories(c2b_vendor INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/third_party)

@@ -1,7 +1,8 @@
 # circus2bmson
 
 Convert vintage tracker music into [bmson](https://bmson-spec.readthedocs.io/),
-the JSON chart format for BMS. First target: **MOD** (ProTracker) modules.
+the JSON chart format for BMS. Accepts **any format libopenmpt plays** — MOD
+(ProTracker & variants), XM, S3M, IT, and dozens more.
 
 The output is a standard bmson folder with every note placed on the **BGM lane
 (`x: 0`)** so the result plays back like the original module and can then be
@@ -12,48 +13,57 @@ charted by hand (e.g. dragged into BmsONE).
 A headless **C++ core library** plus a thin **CLI** wrapper, so the core can
 later link into other projects natively.
 
-Keysounds are produced with **approach #2**: render each MOD channel in
-isolation with libopenmpt (mute all-but-one via the interactive interface),
-then slice each stem at note-on times. This reuses libopenmpt's accurate
-effect/resampling/Paula emulation instead of reimplementing a tracker replayer.
+The score is read **format-agnostically through libopenmpt itself**: the module
+is played once and every row's onset is pinned to the exact sample, so control
+flow (jumps, breaks, loops, pattern delay) and tempo semantics are whatever
+libopenmpt actually played — no per-format sequencer to maintain. An
+independent MOD parser + sequencer is kept in-tree as a validation oracle and
+must agree with the generic engine in CI.
+
+Keysounds are produced by rendering each pattern channel in isolation (mute
+all-but-one via libopenmpt's interactive interface) and slicing each stem at
+note-on times — pitch, effects and panning baked in, reusing libopenmpt's
+accurate playback instead of reimplementing one.
 
 Timing stays on a **musical pulse grid** (resolution 240, one tracker row =
-60 pulses) rather than being converted through seconds, so notes land on clean
-positions for hand-charting. Speed and tempo are folded into bmson `bpm_events`
-(`bpm = 6 * tempo / speed`).
+60 pulses). BPM events use `6 * tempo / speed` when it matches the measured
+row duration, and the measured duration otherwise — so pattern delay and tempo
+slides keep the grid exactly aligned with the rendered audio.
 
 ## Status — roadmap
 
 - [x] **M0** — CMake project (library + CLI + tools), vendored deps, Linux CI.
 - [x] **M0.5** — de-risk the stem approach: prove per-channel renders sum back
-      to the full mix (`tools/stem_sum_check`, gated in CI).
-- [x] **M1** — timeline: direct MOD parser + sequencer that flattens orders
-      (`Bxx`/`Dxx`/`E6x`, `--max-loops`), builds the note grid, `bpm_events` and
-      `lines`, and emits a bmson skeleton (notes on lane 0, provisional
-      keysounds). Timing is cross-checked against libopenmpt's duration in CI.
-- [x] **M2** — render per-channel stems, slice at note-on times, content-hash
-      dedup into stereo WAV keysounds (pitch/effects/pan baked in), and bind each
-      note to its keysound. A reconstruction test (keysounds replaced at their
-      onsets vs libopenmpt's full mix, ~-80 dB residual) gates fidelity in CI.
-- [ ] **M3** — polish the bmson/folder output and validate in beatoraja
-      (drag into BmsONE; confirm the convert -> chart workflow).
-- [ ] **M4** — refinements: `9xx`/`EDx` sub-row precision, finetune, OGG,
-      macOS CI. (Windows CI + prebuilt `.exe` artifact: done.)
+      to the full mix (`tools/stem_sum_check`; gated in CI for MOD, XM and IT).
+- [x] **M1** — timeline on a clean pulse grid: note grid, `bpm_events`, `lines`,
+      `--max-loops` for looping songs; MOD parser + sequencer kept as the
+      validation oracle for the generic engine.
+- [x] **M2** — per-channel stems sliced into deduplicated stereo keysounds
+      (exact onsets; ~-80 dB reconstruction residual gated in CI).
+- [x] **Wider formats** — generic score via libopenmpt: XM/S3M/IT and every
+      other libopenmpt format use the same pipeline (XM + IT covered by
+      fixtures in CI).
+- [x] **OGG** — `--format ogg` encodes keysounds with libvorbis (~70 % smaller
+      folders).
+- [ ] **M3** — validate in beatoraja (drag into BmsONE; confirm the
+      convert -> chart workflow).
+- [ ] **M4** — remaining refinements: sub-row precision (note delay), macOS CI.
+      (Windows CI + prebuilt `.exe` artifact: done.)
 
 ## Building
 
-Requires a C++17 compiler, CMake ≥ 3.16, and libopenmpt.
+Requires a C++17 compiler, CMake ≥ 3.16, libopenmpt and libvorbis.
 
 ```sh
-sudo apt-get install -y libopenmpt-dev cmake ninja-build   # Debian/Ubuntu
-sudo pacman -S --needed libopenmpt cmake ninja gcc          # Arch
+sudo apt-get install -y libopenmpt-dev libvorbis-dev cmake ninja-build  # Debian/Ubuntu
+sudo pacman -S --needed libopenmpt libvorbis cmake ninja gcc            # Arch
 cmake -S . -B build -G Ninja
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
 `nlohmann/json` and `dr_wav` are vendored under `third_party/`, so libopenmpt
-is the only external dependency.
+and libvorbis are the only external dependencies.
 
 ### Windows
 
@@ -67,34 +77,35 @@ shell:
 ```sh
 pacman -S --needed git mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake \
   mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-pkgconf \
-  mingw-w64-ucrt-x86_64-libopenmpt
+  mingw-w64-ucrt-x86_64-libopenmpt mingw-w64-ucrt-x86_64-libvorbis
 cmake -S . -B build -G Ninja && cmake --build build
 ```
 
 ### Convert
 
 ```sh
-./build/cli/circus2bmson tests/fixtures/10k_reggae_dub.mod -o out
-# writes out/10k_reggae_dub.bmson + keysound WAVs (BGM lane)
+./build/cli/circus2bmson song.it -o out      # any libopenmpt format
+./build/cli/circus2bmson song.mod            # -> song/song.bmson beside the file
 ```
 
 With no `-o`, output goes to a folder named after the module, beside it — so on
-Windows you can just **drag a `.mod` onto `circus2bmson.exe`** and get a
-`song/song.bmson` folder next to the file. Other options:
+Windows you can just **drag a module onto `circus2bmson.exe`** and get a
+`song/song.bmson` folder next to the file. Options:
 
 ```sh
-# circus2bmson <input.mod> [-o DIR] [options]
+# circus2bmson <module> [-o DIR] [options]
+# --format wav|ogg      keysound container (default wav; ogg is ~70 % smaller)
 # --name-by channel     channel1_001.wav       (default; simple, per channel)
-# --name-by instrument  s05_bass_ch01_A-2.wav  (descriptive, group by sample)
+# --name-by instrument  s05_bass_ch01_A-2.wav  (descriptive, group by instrument)
 # --name-by lane        ch01_s05_bass_A-2.wav  (descriptive, group by channel)
 # --volume-ramping      keep libopenmpt's anti-click ramp (yields more keysounds)
-# --no-audio    emit the bmson skeleton only (structure, no WAVs)
+# --no-audio    emit the bmson skeleton only (structure, no keysounds)
 # --max-loops N unroll a looping section N times
 ```
 
-By default keysounds are named `channel{N}_{seq}.wav`, so they group by MOD
+By default keysounds are named `channel{N}_{seq}`, so they group by pattern
 channel in an editor's sound list with no clutter. `--name-by instrument`/`lane`
-instead encode the sample, sample name and note (`s05_bass_ch01_A-2.wav`).
+instead encode the instrument number, its name and the note.
 
 Identical notes are deduplicated by exact audio: onsets are pinned to the sample
 so repeats are byte-identical, and libopenmpt's volume ramping is off by default
@@ -102,10 +113,15 @@ so repeats are byte-identical, and libopenmpt's volume ramping is off by default
 previous note). The remaining distinct keysounds reflect genuine differences —
 pitch, volume, effects, hold length and stereo panning.
 
+Format notes: IT *new-note actions* let an old note ring past the next note-on
+on the same channel; that tail is baked into the start of the following
+keysound (playback is still faithful — it just makes that keysound less
+"clean" in isolation).
+
 ### Try the de-risking spike
 
 ```sh
-./build/tools/stem_sum_check tests/fixtures/10k_reggae_dub.mod
+./build/tools/stem_sum_check tests/fixtures/neurosys.xm
 ```
 
 ## Layout

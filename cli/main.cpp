@@ -10,18 +10,21 @@
 namespace {
 
 void print_usage(const char* argv0) {
-  std::cout << "circus2bmson " << circus2bmson::version() << "\n"
-            << "Convert tracker modules (MOD first) to the bmson format.\n\n"
-            << "usage:\n"
-            << "  " << argv0 << " <input.mod> [-o <output_dir>] [--max-loops N]\n"
-            << "  " << argv0 << " --version\n"
-            << "  " << argv0 << " --help\n\n"
-            << "options:\n"
-            << "  -o, --output DIR    output folder (default: a folder named after the input)\n"
-            << "  --max-loops N       times to unroll a looping section (default 1)\n"
-            << "  --name-by WHICH     keysound names: channel (default) | instrument | lane\n"
-            << "  --volume-ramping    keep libopenmpt's anti-click ramp (more keysounds)\n"
-            << "  --no-audio          emit bmson skeleton only (no keysound WAVs)\n";
+  std::cout
+      << "circus2bmson " << circus2bmson::version() << "\n"
+      << "Convert tracker modules to the bmson format.\n"
+      << "Accepts any format libopenmpt plays: MOD, XM, S3M, IT, and more.\n\n"
+      << "usage:\n"
+      << "  " << argv0 << " <module> [-o <output_dir>] [options]\n"
+      << "  " << argv0 << " --version\n"
+      << "  " << argv0 << " --help\n\n"
+      << "options:\n"
+      << "  -o, --output DIR    output folder (default: a folder named after the input)\n"
+      << "  --format FMT        keysound files: wav (default) | ogg\n"
+      << "  --max-loops N       times to unroll a looping section (default 1)\n"
+      << "  --name-by WHICH     keysound names: channel (default) | instrument | lane\n"
+      << "  --volume-ramping    keep libopenmpt's anti-click ramp (more keysounds)\n"
+      << "  --no-audio          emit bmson skeleton only (no keysound files)\n";
 }
 
 }  // namespace
@@ -48,6 +51,20 @@ int main(int argc, char** argv) {
       }
       opts.output_dir = argv[i];
       output_given = true;
+    } else if (a == "--format") {
+      if (++i >= argc) {
+        std::cerr << "error: missing argument for " << a << "\n";
+        return 2;
+      }
+      const std::string fmt = argv[i];
+      if (fmt == "wav") {
+        opts.audio_format = circus2bmson::AudioFormat::Wav;
+      } else if (fmt == "ogg") {
+        opts.audio_format = circus2bmson::AudioFormat::Ogg;
+      } else {
+        std::cerr << "error: --format expects 'wav' or 'ogg'\n";
+        return 2;
+      }
     } else if (a == "--max-loops") {
       if (++i >= argc) {
         std::cerr << "error: missing argument for " << a << "\n";
@@ -87,7 +104,7 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  // With no -o (e.g. dragging a .mod onto the executable), write to a folder
+  // With no -o (e.g. dragging a module onto the executable), write to a folder
   // named after the module, beside it.
   if (!output_given) {
     const std::filesystem::path in(input);
@@ -99,6 +116,7 @@ int main(int argc, char** argv) {
         circus2bmson::convert_mod_file(input, opts);
     std::cout << "wrote   : " << r.bmson_path << "\n"
               << "title   : " << r.title << "\n"
+              << "format  : " << r.format << "\n"
               << "channels: " << r.channels << "\n"
               << "init_bpm: " << r.init_bpm << "\n"
               << "rows    : " << r.emitted_rows << "  (" << r.total_pulses
@@ -109,16 +127,11 @@ int main(int argc, char** argv) {
     if (r.audio_rendered)
       std::cout << "keysound: " << r.keysound_count << " unique  ("
                 << r.total_slices << " note slices)\n";
-    if (r.missing_keysounds > 0)
-      std::cout << "warning : " << r.missing_keysounds
-                << " note(s) had no rendered keysound (alignment)\n";
-    if (r.loops_played > 0)
-      std::cout << "loops   : " << r.loops_played << " unrolled\n";
+    if (r.coarse_rows > 0)
+      std::cout << "warning : " << r.coarse_rows
+                << " row onset(s) could not be pinned exactly\n";
     if (r.truncated)
-      std::cout << "warning : timeline hit the safety row cap (truncated)\n";
-    if (r.unsupported_flow > 0)
-      std::cout << "warning : " << r.unsupported_flow
-                << " unmodelled control-flow effect(s) (e.g. EEx) ignored\n";
+      std::cout << "warning : playback hit the 30-minute safety cap (truncated)\n";
     return 0;
   } catch (const std::exception& e) {
     std::cerr << "error: " << e.what() << "\n";

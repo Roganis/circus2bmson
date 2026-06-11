@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "circus2bmson/mod.hpp"
+#include "circus2bmson/score.hpp"  // shared BpmEvent
 
 // Build a flattened musical timeline from a Module: unroll the order list,
 // follow position jumps / pattern breaks / pattern loops, and place every
@@ -20,11 +21,6 @@ struct NoteEvent {
   std::uint8_t sample = 0;   // effective sample (1..31)
   std::uint16_t period = 0;  // Amiga period
   long pulse = 0;
-};
-
-struct BpmEvent {
-  long pulse = 0;
-  double bpm = 0.0;
 };
 
 struct TimelineOptions {

@@ -6,12 +6,12 @@
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "circus2bmson/bmson.hpp"
-#include "circus2bmson/mod.hpp"
 #include "circus2bmson/render.hpp"
-#include "circus2bmson/timeline.hpp"
+#include "circus2bmson/score.hpp"
 
 namespace circus2bmson {
 namespace {
@@ -28,11 +28,7 @@ std::vector<std::uint8_t> read_file_bytes(const std::string& path) {
 ConvertResult convert_mod_file(const std::string& input_path,
                                const ConvertOptions& opts) {
   const std::vector<std::uint8_t> bytes = read_file_bytes(input_path);
-  const Module mod = parse_mod(bytes);
-
-  TimelineOptions topts;
-  topts.max_loops = opts.max_loops;
-  const Timeline tl = build_timeline(mod, topts);
+  const Score score = read_score(bytes, opts.max_loops);
 
   namespace fs = std::filesystem;
   fs::path out_dir(opts.output_dir);
@@ -41,38 +37,32 @@ ConvertResult convert_mod_file(const std::string& input_path,
   const fs::path out_path = out_dir / (stem + ".bmson");
 
   ConvertResult r;
-  r.title = mod.title;
-  r.channels = mod.channels;
-  r.note_count = tl.notes.size();
-  r.bpm_event_count = tl.bpm_events.size();
-  r.line_count = tl.lines.size();
-  r.init_bpm = tl.init_bpm;
-  r.total_seconds = tl.total_seconds;
-  r.total_pulses = tl.total_pulses;
-  r.emitted_rows = tl.emitted_rows;
-  r.loops_played = tl.loops_played;
-  r.truncated = tl.truncated;
-  r.unsupported_flow = tl.unsupported_flow;
+  r.title = score.title;
+  r.format = score.format;
+  r.channels = score.channels;
+  r.note_count = score.notes.size();
+  r.bpm_event_count = score.bpm_events.size();
+  r.line_count = score.lines.size();
+  r.init_bpm = score.init_bpm;
+  r.total_seconds = score.total_seconds;
+  r.total_pulses = score.total_pulses;
+  r.emitted_rows = static_cast<long>(score.rows.size());
+  r.truncated = score.truncated;
+  r.coarse_rows = score.coarse_rows;
 
   std::string doc;
   if (opts.render_audio) {
     const std::string dir = out_dir.empty() ? "." : out_dir.string();
-    const RenderResult rr = render_keysounds(bytes, mod, dir,
-                                             opts.keysound_naming,
-                                             opts.volume_ramping);
+    const RenderResult rr =
+        render_keysounds(bytes, score, dir, opts.keysound_naming,
+                         opts.volume_ramping, opts.audio_format);
 
-    // Bind every timeline note to its rendered keysound via (order,row,channel).
     std::vector<SoundChannel> channels(rr.keysound_names.size());
     for (std::size_t i = 0; i < channels.size(); ++i)
       channels[i].name = rr.keysound_names[i];
-    long missing = 0;
-    for (const NoteEvent& n : tl.notes) {
-      const auto it = rr.note_to_keysound.find(note_key(n.order, n.row, n.channel));
-      if (it == rr.note_to_keysound.end()) {
-        ++missing;
-        continue;
-      }
-      channels[it->second].note_pulses.push_back(n.pulse);
+    for (std::size_t i = 0; i < score.notes.size(); ++i) {
+      const int id = rr.note_keysound[i];
+      if (id >= 0) channels[id].note_pulses.push_back(score.notes[i].pulse);
     }
     std::vector<SoundChannel> used;
     for (SoundChannel& c : channels)
@@ -83,13 +73,12 @@ ConvertResult convert_mod_file(const std::string& input_path,
                 return a.name < b.name;
               });
 
-    doc = build_bmson(mod, tl, used);
+    doc = build_bmson(score, used);
     r.audio_rendered = true;
     r.total_slices = rr.total_slices;
     r.keysound_count = rr.unique_keysounds;
-    r.missing_keysounds = missing;
   } else {
-    doc = build_bmson_skeleton(mod, tl);
+    doc = build_bmson_skeleton(score, audio_extension(opts.audio_format));
   }
 
   std::ofstream of(out_path, std::ios::binary);

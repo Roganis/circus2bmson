@@ -1,12 +1,18 @@
 # Core conversion library.
-#   M1: MOD parser + timeline builder + bmson emitter.
-#   M2: per-channel keysound rendering (libopenmpt) + WAV output (dr_wav).
+#   score.cpp    format-agnostic score via libopenmpt (MOD/XM/S3M/IT/...)
+#   render.cpp   per-channel keysound rendering + dedup (WAV via dr_wav,
+#                OGG via libvorbis)
+#   bmson.cpp    bmson document emission
+#   mod.cpp / timeline.cpp   independent MOD parser + sequencer, kept as a
+#                validation oracle for the generic path (see tests)
 add_library(circus2bmson
   version.cpp
   mod.cpp
   timeline.cpp
+  score.cpp
   bmson.cpp
   render.cpp
+  oggenc.cpp
   dr_wav_impl.cpp
   convert.cpp
 )
@@ -17,7 +23,7 @@ target_include_directories(circus2bmson
 
 target_link_libraries(circus2bmson
   PUBLIC c2b_vendor
-  PRIVATE PkgConfig::LIBOPENMPT)
+  PRIVATE PkgConfig::LIBOPENMPT PkgConfig::VORBISENC)
 
 target_compile_definitions(circus2bmson
   PRIVATE C2B_VERSION="${PROJECT_VERSION}")

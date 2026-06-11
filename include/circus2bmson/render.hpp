@@ -3,50 +3,50 @@
 
 #include <cstdint>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
-#include "circus2bmson/mod.hpp"
+#include "circus2bmson/score.hpp"
 
 namespace circus2bmson {
 
-// How keysound WAV files are named, so they cluster in an editor's sound list.
-//   Channel:    channel1_001.wav       (default; simple, grouped by MOD channel)
-//   Instrument: s05_bass_ch01_A-2.wav  (descriptive, grouped by sample)
+// How keysound files are named, so they cluster in an editor's sound list.
+//   Channel:    channel1_001.wav       (default; simple, grouped by channel)
+//   Instrument: s05_bass_ch01_A-2.wav  (descriptive, grouped by instrument)
 //   Lane:       ch01_s05_bass_A-2.wav  (descriptive, grouped by channel)
 enum class KeysoundNaming { Channel, Instrument, Lane };
 
-// Stable identity for a note-on cell, used to bind a timeline note to its
-// rendered keysound. Order < 128, row < 64, channel < 64.
-inline std::uint32_t note_key(int order, int row, int channel) {
-  return ((static_cast<std::uint32_t>(order) * 64u + row) * 64u + channel);
+// Keysound audio container.
+enum class AudioFormat { Wav, Ogg };
+
+inline const char* audio_extension(AudioFormat f) {
+  return f == AudioFormat::Ogg ? ".ogg" : ".wav";
 }
 
 struct RenderResult {
   int sample_rate = 44100;
-  std::vector<std::string> keysound_names;  // id -> WAV filename (relative)
-  std::unordered_map<std::uint32_t, int> note_to_keysound;  // note_key -> id
+  std::vector<std::string> keysound_names;  // id -> filename (relative)
+  std::vector<int> note_keysound;           // per Score::notes index -> id
 
-  long render_frames = 0;   // length of one playthrough, in frames
-  long marker_rows = 0;     // rows libopenmpt played (for alignment checks)
-  long total_slices = 0;    // note-ons sliced before dedup
+  long total_slices = 0;     // note-ons sliced before dedup
   long unique_keysounds = 0;
 };
 
-// Render each channel in isolation via libopenmpt, slice every stem at its
-// note-on times, deduplicate identical audio, and write the unique keysounds as
-// stereo 16-bit WAVs into out_dir. Effects, pitch and panning are baked in.
+// Render each pattern channel in isolation via libopenmpt, slice every stem at
+// the score's note-on frames, deduplicate identical audio, and write the unique
+// keysounds into out_dir. Pitch, effects and panning are baked in.
 RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes,
-                              const Module& mod, const std::string& out_dir,
+                              const Score& score, const std::string& out_dir,
                               KeysoundNaming naming = KeysoundNaming::Channel,
-                              bool volume_ramping = false);
+                              bool volume_ramping = false,
+                              AudioFormat format = AudioFormat::Wav);
 
 // End-to-end fidelity check: slice the module into keysounds, place each note's
 // keysound back at its onset, and compare the reconstruction to libopenmpt's
 // full mix. Returns the residual RMS relative to the signal, in dB (more
-// negative is better). A clean pipeline yields a very low residual.
+// negative is better).
 double reconstruct_residual_db(const std::vector<std::uint8_t>& bytes,
-                               const Module& mod, bool volume_ramping = false);
+                               const Score& score,
+                               bool volume_ramping = false);
 
 }  // namespace circus2bmson
 
