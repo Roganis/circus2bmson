@@ -1,10 +1,12 @@
 #include "circus2bmson/render.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -35,6 +37,60 @@ std::int16_t to_i16(float f) {
   if (v > 32767.0f) v = 32767.0f;
   if (v < -32768.0f) v = -32768.0f;
   return static_cast<std::int16_t>(std::lrintf(v));
+}
+
+std::string pad2(int v) {
+  char b[8];
+  std::snprintf(b, sizeof(b), "%02d", v);
+  return b;
+}
+
+// Reduce a MOD sample name to a short, filename-safe token (may be empty).
+std::string sanitize_name(const std::string& s, std::size_t maxlen = 12) {
+  std::string out;
+  bool last_us = false;
+  for (unsigned char ch : s) {
+    if (std::isalnum(ch)) {
+      out.push_back(static_cast<char>(std::tolower(ch)));
+      last_us = false;
+    } else if (!out.empty() && !last_us) {
+      out.push_back('_');
+      last_us = true;
+    }
+  }
+  while (!out.empty() && out.back() == '_') out.pop_back();
+  if (out.size() > maxlen) {
+    out.resize(maxlen);
+    while (!out.empty() && out.back() == '_') out.pop_back();
+  }
+  return out;
+}
+
+// Amiga period -> note name (period 856 == C-1, halving each octave).
+std::string period_to_note_name(int period) {
+  if (period <= 0) return "x";
+  const int n = static_cast<int>(std::lround(12.0 * std::log2(856.0 / period)));
+  const int pc = ((n % 12) + 12) % 12;
+  const int octave = 1 + static_cast<int>(std::floor(n / 12.0));
+  static const char* kNames[12] = {"C",  "C#", "D",  "D#", "E",  "F",
+                                    "F#", "G",  "G#", "A",  "A#", "B"};
+  const std::string nm = kNames[pc];
+  return nm.size() == 1 ? nm + "-" + std::to_string(octave)
+                        : nm + std::to_string(octave);
+}
+
+// Descriptive keysound base name (without extension or collision suffix).
+std::string keysound_base(const Module& mod, KeysoundNaming naming, int sample,
+                          int channel, int period) {
+  const std::string s = "s" + pad2(sample);
+  std::string nm;
+  if (sample >= 1 && sample <= static_cast<int>(mod.samples.size()))
+    nm = sanitize_name(mod.samples[sample - 1].name);
+  const std::string instr = nm.empty() ? s : s + "_" + nm;
+  const std::string ch = "ch" + pad2(channel + 1);  // 1-based for display
+  const std::string note = period_to_note_name(period);
+  return naming == KeysoundNaming::Lane ? ch + "_" + instr + "_" + note
+                                        : instr + "_" + ch + "_" + note;
 }
 
 // Render one channel in isolation (all others muted) to interleaved stereo
@@ -118,13 +174,15 @@ void write_wav(const std::string& path, const std::vector<std::int16_t>& pcm) {
 }  // namespace
 
 RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes_u8,
-                              const Module& mod, const std::string& out_dir) {
+                              const Module& mod, const std::string& out_dir,
+                              KeysoundNaming naming) {
   const std::vector<char> bytes(bytes_u8.begin(), bytes_u8.end());
   RenderResult rr;
   rr.sample_rate = kRate;
 
   std::vector<RowMark> markers;
   std::unordered_map<std::string, int> dedup;  // raw PCM bytes -> keysound id
+  std::set<std::string> used_names;             // keep filenames unique
 
   for (int c = 0; c < mod.channels; ++c) {
     const std::vector<float> stem =
@@ -139,6 +197,9 @@ RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes_u8,
     bool open = false;
     long start = 0;
     std::uint32_t key = 0;
+    int open_sample = 0;
+    int open_period = 0;
+    std::uint8_t last_sample = 0;  // channel's latched sample
 
     auto flush = [&](long end) {
       if (!open) return;
@@ -167,10 +228,14 @@ RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes_u8,
       int id;
       if (found == dedup.end()) {
         id = static_cast<int>(rr.keysound_names.size());
-        char name[24];
-        std::snprintf(name, sizeof(name), "key_%04d.wav", id);
+        const std::string base =
+            keysound_base(mod, naming, open_sample, c, open_period);
+        std::string name = base + ".wav";
+        for (int k = 2; used_names.count(name); ++k)
+          name = base + "_" + std::to_string(k) + ".wav";
+        used_names.insert(name);
         write_wav(out_dir + "/" + name, pcm);
-        rr.keysound_names.emplace_back(name);
+        rr.keysound_names.push_back(name);
         dedup.emplace(std::move(raw), id);
       } else {
         id = found->second;
@@ -180,11 +245,14 @@ RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes_u8,
 
     for (const RowMark& mk : markers) {
       const ModCell& cell = mod.patterns[mod.order[mk.order]].at(mk.row, c);
+      if (cell.sample != 0) last_sample = cell.sample;
       if (cell.period != 0) {
         flush(mk.frame);
         open = true;
         start = mk.frame;
         key = note_key(mk.order, mk.row, c);
+        open_period = cell.period;
+        open_sample = cell.sample != 0 ? cell.sample : last_sample;
       }
     }
     flush(total_frames);

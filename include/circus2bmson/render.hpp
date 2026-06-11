@@ -10,6 +10,11 @@
 
 namespace circus2bmson {
 
+// How keysound WAV files are named, so they cluster in an editor's sound list.
+//   Instrument: s05_bass_ch01_A-2.wav   (group by sample/instrument)
+//   Lane:       ch01_s05_bass_A-2.wav   (group by MOD channel)
+enum class KeysoundNaming { Instrument, Lane };
+
 // Stable identity for a note-on cell, used to bind a timeline note to its
 // rendered keysound. Order < 128, row < 64, channel < 64.
 inline std::uint32_t note_key(int order, int row, int channel) {
@@ -31,7 +36,8 @@ struct RenderResult {
 // note-on times, deduplicate identical audio, and write the unique keysounds as
 // stereo 16-bit WAVs into out_dir. Effects, pitch and panning are baked in.
 RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes,
-                              const Module& mod, const std::string& out_dir);
+                              const Module& mod, const std::string& out_dir,
+                              KeysoundNaming naming = KeysoundNaming::Instrument);
 
 // End-to-end fidelity check: slice the module into keysounds, place each note's
 // keysound back at its onset, and compare the reconstruction to libopenmpt's

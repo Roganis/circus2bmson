@@ -1,5 +1,6 @@
 #include "circus2bmson/convert.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -56,7 +57,8 @@ ConvertResult convert_mod_file(const std::string& input_path,
   std::string doc;
   if (opts.render_audio) {
     const std::string dir = out_dir.empty() ? "." : out_dir.string();
-    const RenderResult rr = render_keysounds(bytes, mod, dir);
+    const RenderResult rr =
+        render_keysounds(bytes, mod, dir, opts.keysound_naming);
 
     // Bind every timeline note to its rendered keysound via (order,row,channel).
     std::vector<SoundChannel> channels(rr.keysound_names.size());
@@ -74,6 +76,11 @@ ConvertResult convert_mod_file(const std::string& input_path,
     std::vector<SoundChannel> used;
     for (SoundChannel& c : channels)
       if (!c.note_pulses.empty()) used.push_back(std::move(c));
+    // Sort by filename so keysounds stay grouped in an editor's sound list.
+    std::sort(used.begin(), used.end(),
+              [](const SoundChannel& a, const SoundChannel& b) {
+                return a.name < b.name;
+              });
 
     doc = build_bmson(mod, tl, used);
     r.audio_rendered = true;

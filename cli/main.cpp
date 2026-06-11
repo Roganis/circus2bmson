@@ -18,6 +18,7 @@ void print_usage(const char* argv0) {
             << "options:\n"
             << "  -o, --output DIR    output folder (default: current dir)\n"
             << "  --max-loops N       times to unroll a looping section (default 1)\n"
+            << "  --name-by WHICH     keysound names: instrument (default) | lane\n"
             << "  --no-audio          emit bmson skeleton only (no keysound WAVs)\n";
 }
 
@@ -49,6 +50,20 @@ int main(int argc, char** argv) {
         return 2;
       }
       opts.max_loops = std::atoi(argv[i]);
+    } else if (a == "--name-by") {
+      if (++i >= argc) {
+        std::cerr << "error: missing argument for " << a << "\n";
+        return 2;
+      }
+      const std::string which = argv[i];
+      if (which == "instrument") {
+        opts.keysound_naming = circus2bmson::KeysoundNaming::Instrument;
+      } else if (which == "lane") {
+        opts.keysound_naming = circus2bmson::KeysoundNaming::Lane;
+      } else {
+        std::cerr << "error: --name-by expects 'instrument' or 'lane'\n";
+        return 2;
+      }
     } else if (a == "--no-audio") {
       opts.render_audio = false;
     } else if (!a.empty() && a[0] == '-') {

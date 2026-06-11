@@ -43,3 +43,11 @@ target_link_libraries(test_keysound_fidelity PRIVATE circus2bmson::circus2bmson)
 target_compile_definitions(test_keysound_fidelity PRIVATE
   C2B_FIXTURE_DIR="${C2B_FIXTURE_DIR}")
 add_test(NAME keysound_fidelity COMMAND test_keysound_fidelity)
+
+# M2: render path -- descriptive unique WAV names, every note bound.
+add_executable(test_keysound_render test_keysound_render.cpp)
+target_link_libraries(test_keysound_render PRIVATE circus2bmson::circus2bmson)
+target_compile_definitions(test_keysound_render PRIVATE
+  C2B_FIXTURE_DIR="${C2B_FIXTURE_DIR}"
+  C2B_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/test_out")
+add_test(NAME keysound_render COMMAND test_keysound_render)

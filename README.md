@@ -75,10 +75,16 @@ cmake -S . -B build -G Ninja && cmake --build build
 
 ```sh
 ./build/cli/circus2bmson tests/fixtures/10k_reggae_dub.mod -o out
-# writes out/10k_reggae_dub.bmson + out/key_*.wav (BGM lane, real keysounds)
+# writes out/10k_reggae_dub.bmson + descriptive keysound WAVs (BGM lane)
+# --name-by instrument  s05_bass_ch01_A-2.wav  (default; group by sample)
+# --name-by lane        ch01_s05_bass_A-2.wav  (group by MOD channel)
 # --no-audio    emit the bmson skeleton only (structure, no WAVs)
 # --max-loops N unroll a looping section N times
 ```
+
+Keysound files are named from their source note — `s{sample}_{name}_ch{channel}_{note}` —
+so they cluster by instrument (or by lane with `--name-by lane`) in an editor's
+sound list. Same sample+note with different realized audio gets a `_2`, `_3` suffix.
 
 ### Try the de-risking spike
 
