@@ -37,14 +37,15 @@ struct RenderResult {
 // stereo 16-bit WAVs into out_dir. Effects, pitch and panning are baked in.
 RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes,
                               const Module& mod, const std::string& out_dir,
-                              KeysoundNaming naming = KeysoundNaming::Instrument);
+                              KeysoundNaming naming = KeysoundNaming::Instrument,
+                              bool volume_ramping = false);
 
 // End-to-end fidelity check: slice the module into keysounds, place each note's
 // keysound back at its onset, and compare the reconstruction to libopenmpt's
 // full mix. Returns the residual RMS relative to the signal, in dB (more
 // negative is better). A clean pipeline yields a very low residual.
 double reconstruct_residual_db(const std::vector<std::uint8_t>& bytes,
-                               const Module& mod);
+                               const Module& mod, bool volume_ramping = false);
 
 }  // namespace circus2bmson
 

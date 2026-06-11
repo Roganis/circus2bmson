@@ -19,6 +19,7 @@ void print_usage(const char* argv0) {
             << "  -o, --output DIR    output folder (default: current dir)\n"
             << "  --max-loops N       times to unroll a looping section (default 1)\n"
             << "  --name-by WHICH     keysound names: instrument (default) | lane\n"
+            << "  --volume-ramping    keep libopenmpt's anti-click ramp (more keysounds)\n"
             << "  --no-audio          emit bmson skeleton only (no keysound WAVs)\n";
 }
 
@@ -64,6 +65,8 @@ int main(int argc, char** argv) {
         std::cerr << "error: --name-by expects 'instrument' or 'lane'\n";
         return 2;
       }
+    } else if (a == "--volume-ramping") {
+      opts.volume_ramping = true;
     } else if (a == "--no-audio") {
       opts.render_audio = false;
     } else if (!a.empty() && a[0] == '-') {

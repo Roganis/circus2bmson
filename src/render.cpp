@@ -5,7 +5,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -21,8 +20,7 @@ namespace circus2bmson {
 namespace {
 
 constexpr int kRate = 44100;
-constexpr std::size_t kMarkerChunk = 64;    // small: sample-accurate row onsets
-constexpr std::size_t kBulkChunk = 4096;    // large: audio-only passes
+constexpr std::size_t kBulkChunk = 4096;    // bulk render chunk
 constexpr float kSilence = 1.0e-4f;         // trailing-silence trim threshold
 
 // A row in libopenmpt playback order with its starting frame offset.
@@ -93,15 +91,19 @@ std::string keysound_base(const Module& mod, KeysoundNaming naming, int sample,
                                         : instr + "_" + ch + "_" + note;
 }
 
-// Render one channel in isolation (all others muted) to interleaved stereo
-// float. When `markers` is non-null, poll the row position with a small chunk
-// to record each row's onset frame.
+// Render one channel in isolation to interleaved stereo float (bulk; no
+// position polling). channel < 0 -> full mix (mute nothing).
 std::vector<float> render_channel(const std::vector<char>& bytes, int channel,
-                                  int num_channels,
-                                  std::vector<RowMark>* markers) {
+                                  int num_channels, bool volume_ramping) {
   openmpt::module_ext mod(bytes);
   mod.set_repeat_count(0);
-  if (channel >= 0) {  // channel < 0 -> full mix (mute nothing)
+  // By default disable libopenmpt's anti-click volume ramping: it makes a
+  // note's first ~1 ms depend on the previous note's tail, which stops
+  // otherwise-identical notes from deduplicating. Amiga Paula had no ramping,
+  // so off is also more authentic.
+  if (!volume_ramping)
+    mod.set_render_param(openmpt::module::RENDER_VOLUMERAMPING_STRENGTH, 0);
+  if (channel >= 0) {
     auto* interactive = static_cast<openmpt::ext::interactive*>(
         mod.get_interface(openmpt::ext::interactive_id));
     if (!interactive)
@@ -109,52 +111,89 @@ std::vector<float> render_channel(const std::vector<char>& bytes, int channel,
     for (int j = 0; j < num_channels; ++j)
       interactive->set_channel_mute_status(j, /*mute=*/j != channel);
   }
-
-  const std::size_t chunk = markers ? kMarkerChunk : kBulkChunk;
   std::vector<float> stem;
-  std::vector<float> buf(2 * chunk);
-  long frames = 0;
-  int prev_order = mod.get_current_order();
-  int prev_row = mod.get_current_row();
-  if (markers) {
-    markers->clear();
-    markers->push_back({0, prev_order, prev_row});
-  }
-
+  std::vector<float> buf(2 * kBulkChunk);
   for (;;) {
     const std::size_t n =
-        mod.read_interleaved_stereo(kRate, chunk, buf.data());
+        mod.read_interleaved_stereo(kRate, kBulkChunk, buf.data());
     if (n == 0) break;
     stem.insert(stem.end(), buf.begin(), buf.begin() + 2 * n);
-    if (markers) {
-      const int o = mod.get_current_order();
-      const int r = mod.get_current_row();
-      if (o != prev_order || r != prev_row) {
-        markers->push_back({frames, o, r});  // start-of-chunk: <= true onset
-        prev_order = o;
-        prev_row = r;
-      }
-    }
-    frames += static_cast<long>(n);
-  }
-  // libopenmpt reports a terminal position wrap back to the song start once
-  // playback ends; drop that trailing backward marker so the first row's
-  // note-ons are not re-sliced (which would also mis-map their keysounds).
-  if (markers && markers->size() >= 2) {
-    const RowMark& last = markers->back();
-    const RowMark& prev = (*markers)[markers->size() - 2];
-    if (last.order < prev.order ||
-        (last.order == prev.order && last.row <= prev.row))
-      markers->pop_back();
-  }
-  if (markers && std::getenv("C2B_DEBUG_MARKERS")) {
-    std::fprintf(stderr, "[markers] count=%zu  last:\n", markers->size());
-    for (std::size_t i = markers->size() > 8 ? markers->size() - 8 : 0;
-         i < markers->size(); ++i)
-      std::fprintf(stderr, "   #%zu frame=%ld order=%d row=%d\n", i,
-                   (*markers)[i].frame, (*markers)[i].order, (*markers)[i].row);
   }
   return stem;
+}
+
+// Sample-accurate onset frame for every played row. libopenmpt has no per-row
+// callback, so we fast-forward to just before each row's expected end (using
+// that row's own speed/tempo) and then step one frame at a time to pin the
+// exact transition. Exact onsets keep repeats of the same note byte-identical
+// so they deduplicate, while the fast-forward keeps it quick.
+std::vector<RowMark> compute_row_markers(const std::vector<char>& bytes,
+                                         const Module& mod) {
+  openmpt::module m(bytes);
+  m.set_repeat_count(0);
+
+  int speed = 6, tempo = 125;
+  auto apply_fxx = [&](int o, int r) {
+    const ModPattern& pat = mod.patterns[mod.order[o]];
+    for (int ch = 0; ch < pat.channels; ++ch) {
+      const ModCell& c = pat.at(r, ch);
+      if (c.effect == 0xF && c.param != 0) {
+        if (c.param < 0x20) speed = c.param;
+        else tempo = c.param;
+      }
+    }
+  };
+
+  std::vector<RowMark> markers;
+  std::vector<float> buf(2 * kBulkChunk);
+  long frame = 0;
+  int prev_o = m.get_current_order();
+  int prev_r = m.get_current_row();
+  markers.push_back({0, prev_o, prev_r});
+  apply_fxx(prev_o, prev_r);
+
+  for (;;) {
+    // Fast-forward to a safe margin before the expected next boundary.
+    long est = std::lround(kRate * 2.5 * speed / tempo) - 256;
+    if (est < 0) est = 0;
+    bool ended = false;
+    for (long done = 0; done < est;) {
+      const std::size_t want =
+          static_cast<std::size_t>(std::min<long>(est - done, kBulkChunk));
+      const std::size_t n = m.read_interleaved_stereo(kRate, want, buf.data());
+      if (n == 0) { ended = true; break; }
+      done += static_cast<long>(n);
+      frame += static_cast<long>(n);
+    }
+    if (ended) break;
+    // Step one frame at a time to pin the exact row transition.
+    for (;;) {
+      const std::size_t n = m.read_interleaved_stereo(kRate, 1, buf.data());
+      if (n == 0) { ended = true; break; }
+      ++frame;
+      const int o = m.get_current_order();
+      const int r = m.get_current_row();
+      if (o != prev_o || r != prev_r) {
+        markers.push_back({frame - 1, o, r});
+        prev_o = o;
+        prev_r = r;
+        apply_fxx(o, r);
+        break;
+      }
+    }
+    if (ended) break;
+  }
+
+  // libopenmpt reports a terminal position wrap back to the song start once
+  // playback ends; drop that trailing backward marker.
+  if (markers.size() >= 2) {
+    const RowMark& last = markers.back();
+    const RowMark& prev = markers[markers.size() - 2];
+    if (last.order < prev.order ||
+        (last.order == prev.order && last.row <= prev.row))
+      markers.pop_back();
+  }
+  return markers;
 }
 
 void write_wav(const std::string& path, const std::vector<std::int16_t>& pcm) {
@@ -175,22 +214,20 @@ void write_wav(const std::string& path, const std::vector<std::int16_t>& pcm) {
 
 RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes_u8,
                               const Module& mod, const std::string& out_dir,
-                              KeysoundNaming naming) {
+                              KeysoundNaming naming, bool volume_ramping) {
   const std::vector<char> bytes(bytes_u8.begin(), bytes_u8.end());
   RenderResult rr;
   rr.sample_rate = kRate;
 
-  std::vector<RowMark> markers;
+  const std::vector<RowMark> markers = compute_row_markers(bytes, mod);
+  rr.marker_rows = static_cast<long>(markers.size());
   std::unordered_map<std::string, int> dedup;  // raw PCM bytes -> keysound id
   std::set<std::string> used_names;             // keep filenames unique
 
   for (int c = 0; c < mod.channels; ++c) {
     const std::vector<float> stem =
-        render_channel(bytes, c, mod.channels, c == 0 ? &markers : nullptr);
-    if (c == 0) {
-      rr.render_frames = static_cast<long>(stem.size() / 2);
-      rr.marker_rows = static_cast<long>(markers.size());
-    }
+        render_channel(bytes, c, mod.channels, volume_ramping);
+    if (c == 0) rr.render_frames = static_cast<long>(stem.size() / 2);
     const long total_frames = static_cast<long>(stem.size() / 2);
 
     // Slice the channel at its note-ons; each slice runs to the next note-on.
@@ -263,12 +300,12 @@ RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes_u8,
 }
 
 double reconstruct_residual_db(const std::vector<std::uint8_t>& bytes_u8,
-                               const Module& mod) {
+                               const Module& mod, bool volume_ramping) {
   const std::vector<char> bytes(bytes_u8.begin(), bytes_u8.end());
 
-  std::vector<RowMark> markers;
-  render_channel(bytes, 0, mod.channels, &markers);  // markers only
-  const std::vector<float> mix = render_channel(bytes, -1, mod.channels, nullptr);
+  const std::vector<RowMark> markers = compute_row_markers(bytes, mod);
+  const std::vector<float> mix =
+      render_channel(bytes, -1, mod.channels, volume_ramping);
   const long total_frames = static_cast<long>(mix.size() / 2);
 
   std::unordered_map<std::string, int> dedup;
@@ -278,7 +315,7 @@ double reconstruct_residual_db(const std::vector<std::uint8_t>& bytes_u8,
 
   for (int c = 0; c < mod.channels; ++c) {
     const std::vector<float> stem =
-        render_channel(bytes, c, mod.channels, nullptr);
+        render_channel(bytes, c, mod.channels, volume_ramping);
     bool open = false;
     long start = 0;
     std::uint32_t key = 0;

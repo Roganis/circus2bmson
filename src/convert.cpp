@@ -57,8 +57,9 @@ ConvertResult convert_mod_file(const std::string& input_path,
   std::string doc;
   if (opts.render_audio) {
     const std::string dir = out_dir.empty() ? "." : out_dir.string();
-    const RenderResult rr =
-        render_keysounds(bytes, mod, dir, opts.keysound_naming);
+    const RenderResult rr = render_keysounds(bytes, mod, dir,
+                                             opts.keysound_naming,
+                                             opts.volume_ramping);
 
     // Bind every timeline note to its rendered keysound via (order,row,channel).
     std::vector<SoundChannel> channels(rr.keysound_names.size());

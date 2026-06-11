@@ -78,6 +78,7 @@ cmake -S . -B build -G Ninja && cmake --build build
 # writes out/10k_reggae_dub.bmson + descriptive keysound WAVs (BGM lane)
 # --name-by instrument  s05_bass_ch01_A-2.wav  (default; group by sample)
 # --name-by lane        ch01_s05_bass_A-2.wav  (group by MOD channel)
+# --volume-ramping      keep libopenmpt's anti-click ramp (yields more keysounds)
 # --no-audio    emit the bmson skeleton only (structure, no WAVs)
 # --max-loops N unroll a looping section N times
 ```
@@ -85,6 +86,12 @@ cmake -S . -B build -G Ninja && cmake --build build
 Keysound files are named from their source note — `s{sample}_{name}_ch{channel}_{note}` —
 so they cluster by instrument (or by lane with `--name-by lane`) in an editor's
 sound list. Same sample+note with different realized audio gets a `_2`, `_3` suffix.
+
+Identical notes are deduplicated by exact audio: onsets are pinned to the sample
+so repeats are byte-identical, and libopenmpt's volume ramping is off by default
+(more authentic to Amiga, and it stops a note's attack from depending on the
+previous note). The remaining distinct keysounds reflect genuine differences —
+pitch, volume, effects, hold length and stereo panning.
 
 ### Try the de-risking spike
 
