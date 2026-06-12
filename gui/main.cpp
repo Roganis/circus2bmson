@@ -1,8 +1,7 @@
-// Minimal circus2bmson GUI (vertical slice): point it at a module (type/paste a
-// path, Browse, or drag one onto the window) and convert it with default
-// options. The path field works with no external deps; Browse needs a system
-// dialog helper (zenity/kdialog); drag-drop needs GLFW's X11 backend. Full
-// option widgets and a (MIDI) soundfont picker land next.
+// circus2bmson GUI: point it at a module (type/paste a path, Browse, or drag one
+// onto the window), set the conversion options, and Convert. Wraps the same
+// convert_mod_file the CLI uses; conversion runs on a worker thread so the
+// window stays responsive.
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -25,16 +24,25 @@
 namespace {
 
 struct AppState {
-  char input[1024] = {0};  // module path (only touched on the main thread)
-  std::mutex mtx;          // guards `log`
+  // Widget-backed values (only touched on the main/UI thread).
+  char input[1024] = {0};
+  char output[1024] = {0};    // blank -> a folder named after the input
+  char soundfont[1024] = {0};
+  bool render_audio = true;
+  int audio_format = 0;       // 0 = WAV, 1 = OGG
+  int naming = 0;             // 0 = Channel, 1 = Instrument, 2 = Lane
+  int max_loops = 1;
+  bool volume_ramping = false;
+
+  std::mutex mtx;             // guards `log`
   std::string log;
   std::atomic<bool> busy{false};
 };
 
 AppState* g_app = nullptr;  // for the GLFW drop callback (C function pointer)
 
-void set_input(AppState& s, const std::string& path) {
-  std::snprintf(s.input, sizeof(s.input), "%s", path.c_str());
+void copy_to(char* buf, std::size_t n, const std::string& v) {
+  std::snprintf(buf, n, "%s", v.c_str());
 }
 
 void log_line(AppState& s, const std::string& line) {
@@ -49,10 +57,9 @@ std::string default_output_dir(const std::string& input) {
   return (in.parent_path() / in.stem()).string();
 }
 
-void convert_worker(AppState* s, std::string input) {
+void convert_worker(AppState* s, std::string input,
+                    circus2bmson::ConvertOptions opts) {
   try {
-    circus2bmson::ConvertOptions opts;
-    opts.output_dir = default_output_dir(input);
     const circus2bmson::ConvertResult r =
         circus2bmson::convert_mod_file(input, opts);
     std::string m;
@@ -62,7 +69,11 @@ void convert_worker(AppState* s, std::string input) {
     m += "channels: " + std::to_string(r.channels) + "\n";
     m += "notes   : " + std::to_string(r.note_count);
     if (r.audio_rendered)
-      m += "\nkeysound: " + std::to_string(r.keysound_count) + " unique";
+      m += "\nkeysound: " + std::to_string(r.keysound_count) + " unique (" +
+           std::to_string(r.total_slices) + " slices)";
+    if (r.coarse_rows > 0)
+      m += "\nwarning : " + std::to_string(r.coarse_rows) +
+           " row onset(s) not pinned exactly";
     log_line(*s, m);
   } catch (const std::exception& e) {
     log_line(*s, std::string("error: ") + e.what());
@@ -72,10 +83,24 @@ void convert_worker(AppState* s, std::string input) {
 
 void start_convert(AppState& s) {
   if (s.busy || s.input[0] == '\0') return;
+  using circus2bmson::AudioFormat;
+  using circus2bmson::KeysoundNaming;
+
+  circus2bmson::ConvertOptions opts;
+  opts.output_dir =
+      s.output[0] != '\0' ? std::string(s.output) : default_output_dir(s.input);
+  opts.render_audio = s.render_audio;
+  opts.audio_format = s.audio_format == 1 ? AudioFormat::Ogg : AudioFormat::Wav;
+  opts.keysound_naming = s.naming == 1   ? KeysoundNaming::Instrument
+                         : s.naming == 2 ? KeysoundNaming::Lane
+                                         : KeysoundNaming::Channel;
+  opts.max_loops = s.max_loops < 1 ? 1 : s.max_loops;
+  opts.volume_ramping = s.volume_ramping;
+  opts.soundfont_path = s.soundfont;  // inert until the MIDI backend exists
+
   s.busy = true;
-  std::string in = s.input;
-  log_line(s, "converting " + in + " ...");
-  std::thread(convert_worker, &s, std::move(in)).detach();
+  log_line(s, "converting " + std::string(s.input) + " ...");
+  std::thread(convert_worker, &s, std::string(s.input), std::move(opts)).detach();
 }
 
 void pick_input(AppState& s) {
@@ -86,28 +111,111 @@ void pick_input(AppState& s) {
                   "*.ptm *.stm *.ult *.far",
                   "All files", "*"})
                  .result();
-  if (!sel.empty()) set_input(s, sel[0]);
+  if (!sel.empty()) copy_to(s.input, sizeof(s.input), sel[0]);
+}
+
+void pick_output(AppState& s) {
+  auto dir = pfd::select_folder("Output folder").result();
+  if (!dir.empty()) copy_to(s.output, sizeof(s.output), dir);
+}
+
+void pick_soundfont(AppState& s) {
+  auto sel =
+      pfd::open_file("Select a SoundFont", ".",
+                     {"SoundFont", "*.sf2 *.sf3", "All files", "*"})
+          .result();
+  if (!sel.empty()) copy_to(s.soundfont, sizeof(s.soundfont), sel[0]);
 }
 
 void drop_callback(GLFWwindow*, int count, const char** paths) {
-  if (g_app && count > 0) set_input(*g_app, paths[0]);
+  if (g_app && count > 0) copy_to(g_app->input, sizeof(g_app->input), paths[0]);
 }
 
 void glfw_error(int code, const char* desc) {
   std::fprintf(stderr, "glfw error %d: %s\n", code, desc);
 }
 
+// A "[path field..............] [Browse...]" row. Returns true if Browse clicked.
+bool path_row(const char* id, const char* hint, char* buf, std::size_t n) {
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 92.0f);
+  ImGui::InputTextWithHint(id, hint, buf, n);
+  ImGui::SameLine();
+  char btn[40];
+  std::snprintf(btn, sizeof(btn), "Browse...%s", id);
+  return ImGui::Button(btn);
+}
+
 bool init_glfw() {
 #if defined(__linux__) && defined(GLFW_PLATFORM_X11)
   // Prefer X11 (drag-drop only works on GLFW's X11 backend; under Wayland it
   // runs via XWayland). Fall back to the default platform if X11 is
-  // unavailable -- e.g. a Wayland session with no XWayland -- so the app still
-  // starts (the path field and Browse still work there).
+  // unavailable (e.g. a Wayland session with no XWayland) so the app still
+  // starts and stays usable via the path field.
   glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
   if (glfwInit()) return true;
   glfwInitHint(GLFW_PLATFORM, GLFW_ANY_PLATFORM);
 #endif
   return glfwInit();
+}
+
+void draw_ui(AppState& s) {
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(vp->WorkPos);
+  ImGui::SetNextWindowSize(vp->WorkSize);
+  ImGui::Begin("circus2bmson", nullptr,
+               ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                   ImGuiWindowFlags_NoBringToFrontOnFocus);
+
+  ImGui::TextUnformatted("Module (type/paste a path, Browse, or drag a file in):");
+  if (path_row("##in", "/path/to/song.mod", s.input, sizeof(s.input)))
+    pick_input(s);
+
+  ImGui::TextUnformatted("Output folder (blank = a folder beside the input):");
+  if (path_row("##out", "(default)", s.output, sizeof(s.output))) pick_output(s);
+
+  ImGui::Dummy(ImVec2(0, 4));
+  ImGui::Checkbox("Render keysounds (audio)", &s.render_audio);
+  ImGui::Indent();
+  ImGui::BeginDisabled(!s.render_audio);
+  ImGui::TextUnformatted("Format:");
+  ImGui::SameLine();
+  ImGui::RadioButton("WAV", &s.audio_format, 0);
+  ImGui::SameLine();
+  ImGui::RadioButton("OGG", &s.audio_format, 1);
+  ImGui::SetNextItemWidth(180);
+  ImGui::Combo("Keysound names", &s.naming, "Channel\0Instrument\0Lane\0");
+  ImGui::Checkbox("Volume ramping (libopenmpt smoothing; more keysounds)",
+                  &s.volume_ramping);
+  ImGui::EndDisabled();
+  ImGui::Unindent();
+
+  ImGui::SetNextItemWidth(120);
+  ImGui::InputInt("Max loops (unroll looping songs)", &s.max_loops);
+  if (s.max_loops < 1) s.max_loops = 1;
+
+  ImGui::Dummy(ImVec2(0, 4));
+  ImGui::TextUnformatted("SoundFont (.sf2):");
+  ImGui::SameLine();
+  ImGui::TextDisabled("(used for MIDI input - not yet supported)");
+  if (path_row("##sf", "(bundled default)", s.soundfont, sizeof(s.soundfont)))
+    pick_soundfont(s);
+
+  ImGui::Dummy(ImVec2(0, 6));
+  ImGui::BeginDisabled(s.busy || s.input[0] == '\0');
+  if (ImGui::Button("Convert", ImVec2(120, 0))) start_convert(s);
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  ImGui::TextUnformatted(s.busy ? "converting..." : "");
+
+  ImGui::SeparatorText("Log");
+  ImGui::BeginChild("log", ImVec2(0, 0));
+  {
+    std::lock_guard<std::mutex> lk(s.mtx);
+    ImGui::TextUnformatted(s.log.c_str());
+  }
+  ImGui::EndChild();
+  ImGui::End();
 }
 
 }  // namespace
@@ -132,7 +240,7 @@ int main() {
 #endif
 
   GLFWwindow* window =
-      glfwCreateWindow(700, 480, "circus2bmson", nullptr, nullptr);
+      glfwCreateWindow(720, 560, "circus2bmson", nullptr, nullptr);
   if (!window) {
     std::fprintf(stderr, "failed to create window\n");
     glfwTerminate();
@@ -146,6 +254,7 @@ int main() {
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
+  ImGui::GetIO().IniFilename = nullptr;  // don't write imgui.ini
   ImGui::StyleColorsDark();
   ImGui_ImplGlfw_InitForOpenGL(window, true);
   ImGui_ImplOpenGL3_Init(glsl_version);
@@ -157,28 +266,7 @@ int main() {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    ImGui::Begin("circus2bmson");
-    ImGui::TextUnformatted("Module path (type/paste, Browse, or drag a file in):");
-    ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputTextWithHint("##path", "/path/to/song.mod", state.input,
-                             sizeof(state.input));
-    if (ImGui::Button("Browse...")) pick_input(state);
-    ImGui::SameLine();
-    ImGui::BeginDisabled(state.busy || state.input[0] == '\0');
-    if (ImGui::Button("Convert")) start_convert(state);
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    ImGui::TextUnformatted(state.busy ? "converting..." : "");
-
-    ImGui::Separator();
-    ImGui::TextUnformatted("Log:");
-    ImGui::BeginChild("log", ImVec2(0, 0));
-    {
-      std::lock_guard<std::mutex> lk(state.mtx);
-      ImGui::TextUnformatted(state.log.c_str());
-    }
-    ImGui::EndChild();
-    ImGui::End();
+    draw_ui(state);
 
     ImGui::Render();
     int w = 0, h = 0;

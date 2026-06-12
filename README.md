@@ -69,10 +69,11 @@ and libvorbis are the only external dependencies.
 
 An optional desktop front-end (Dear ImGui, vendored) is built with
 `-DC2B_BUILD_GUI=ON` (needs GLFW: apt `libglfw3-dev` + `libgl1-mesa-dev`, or
-MSYS2 `mingw-w64-ucrt-x86_64-glfw`). It currently does one thing — point it at a
-module (type/paste a path, **Browse…**, or drag one onto the window) and it
-converts with default options — with the full option widgets and a (MIDI)
-soundfont picker to follow.
+MSYS2 `mingw-w64-ucrt-x86_64-glfw`). It wraps the same conversion as the CLI:
+point it at a module (type/paste a path, **Browse…**, or drag one onto the
+window), set the options (WAV/OGG, keysound naming, max-loops, volume ramping,
+output folder) and Convert. A SoundFont (`.sf2`) picker is present for the
+forthcoming MIDI backend (inert for tracker input).
 
 Input methods degrade gracefully by environment: the **path field** always
 works (no dependencies); **Browse…** needs a system dialog helper

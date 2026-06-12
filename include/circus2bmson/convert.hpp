@@ -15,6 +15,9 @@ struct ConvertOptions {
   KeysoundNaming keysound_naming = KeysoundNaming::Channel;
   bool volume_ramping = false;  // true -> libopenmpt smoothing (more dupes)
   AudioFormat audio_format = AudioFormat::Wav;
+  // For MIDI input (future): user-supplied SoundFont replacing the bundled
+  // default. Ignored by the tracker backends.
+  std::string soundfont_path = "";
 };
 
 struct ConvertResult {
