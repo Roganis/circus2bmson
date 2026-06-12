@@ -1,8 +1,7 @@
-// Minimal circus2bmson GUI (vertical slice): drag a module onto the window and
-// convert it with default options, showing the result. Option widgets, the
-// output/soundfont pickers and native file dialogs land in the next iteration;
-// this slice exists to prove the Dear ImGui + GLFW build and the CI/artifact
-// bundling on Linux and Windows.
+// Minimal circus2bmson GUI (vertical slice): pick a module (Browse or drag it
+// onto the window) and convert it with default options, showing the result.
+// The full option widgets and a (MIDI) soundfont picker land next; this slice
+// proves the Dear ImGui + GLFW build and the CI/artifact path.
 #include <atomic>
 #include <cstdio>
 #include <exception>
@@ -16,6 +15,7 @@
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+#include "portable_file_dialogs/portable-file-dialogs.h"
 
 #include "circus2bmson/circus2bmson.hpp"
 #include "circus2bmson/convert.hpp"
@@ -28,6 +28,8 @@ struct AppState {
   std::string log;
   std::atomic<bool> busy{false};
 };
+
+AppState* g_app = nullptr;  // for the GLFW drop callback (C function pointer)
 
 void log_line(AppState& s, const std::string& line) {
   std::lock_guard<std::mutex> lk(s.mtx);
@@ -69,9 +71,19 @@ void start_convert(AppState& s) {
   std::thread(convert_worker, &s, s.input_path).detach();
 }
 
-void drop_callback(GLFWwindow* win, int count, const char** paths) {
-  auto* s = static_cast<AppState*>(glfwGetWindowUserPointer(win));
-  if (s && count > 0) s->input_path = paths[0];
+void pick_input(AppState& s) {
+  auto sel = pfd::open_file(
+                 "Select a module", ".",
+                 {"Tracker modules",
+                  "*.mod *.xm *.s3m *.it *.mptm *.mtm *.669 *.med *.okt *.dbm "
+                  "*.ptm *.stm *.ult *.far",
+                  "All files", "*"})
+                 .result();
+  if (!sel.empty()) s.input_path = sel[0];
+}
+
+void drop_callback(GLFWwindow*, int count, const char** paths) {
+  if (g_app && count > 0) g_app->input_path = paths[0];
 }
 
 void glfw_error(int code, const char* desc) {
@@ -82,6 +94,13 @@ void glfw_error(int code, const char* desc) {
 
 int main() {
   glfwSetErrorCallback(glfw_error);
+
+#if defined(__linux__) && defined(GLFW_PLATFORM_X11)
+  // GLFW delivers file-drop events only on its X11 backend, not on Wayland, so
+  // prefer X11 (XWayland under a Wayland session) and drag-and-drop works.
+  glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#endif
+
   if (!glfwInit()) {
     std::fprintf(stderr, "failed to initialise GLFW\n");
     return 1;
@@ -110,14 +129,14 @@ int main() {
   glfwSwapInterval(1);
 
   AppState state;
-  glfwSetWindowUserPointer(window, &state);
-  glfwSetDropCallback(window, drop_callback);
+  g_app = &state;
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGui::StyleColorsDark();
   ImGui_ImplGlfw_InitForOpenGL(window, true);
   ImGui_ImplOpenGL3_Init(glsl_version);
+  glfwSetDropCallback(window, drop_callback);  // after ImGui installs its own
 
   while (!glfwWindowShouldClose(window)) {
     glfwPollEvents();
@@ -126,9 +145,9 @@ int main() {
     ImGui::NewFrame();
 
     ImGui::Begin("circus2bmson");
-    ImGui::TextUnformatted(
-        "Drag a module (MOD/XM/S3M/IT/...) onto this window.");
-    ImGui::Separator();
+    ImGui::TextUnformatted("Choose a module, or drag one onto the window.");
+    if (ImGui::Button("Browse...")) pick_input(state);
+    ImGui::SameLine();
     ImGui::Text("input: %s",
                 state.input_path.empty() ? "(none)" : state.input_path.c_str());
 

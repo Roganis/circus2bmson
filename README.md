@@ -69,9 +69,12 @@ and libvorbis are the only external dependencies.
 
 An optional desktop front-end (Dear ImGui, vendored) is built with
 `-DC2B_BUILD_GUI=ON` (needs GLFW: apt `libglfw3-dev` + `libgl1-mesa-dev`, or
-MSYS2 `mingw-w64-ucrt-x86_64-glfw`). It currently does one thing — drag a module
-onto the window and it converts with default options — with the option widgets
-and a (MIDI) soundfont picker to follow.
+MSYS2 `mingw-w64-ucrt-x86_64-glfw`). It currently does one thing — pick a module
+(the **Browse…** button, or drag one onto the window) and it converts with
+default options — with the full option widgets and a (MIDI) soundfont picker to
+follow. On Linux, drag-and-drop needs GLFW's X11 backend, so the app forces X11
+(via XWayland under a Wayland session); the Browse dialog uses zenity/kdialog
+and works on any session.
 
 CI publishes prebuilt binaries: `circus2bmson-gui.exe` in the
 `circus2bmson-windows-x64` artifact, and a Linux
