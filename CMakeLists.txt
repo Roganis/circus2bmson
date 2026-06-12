@@ -12,9 +12,12 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-option(C2B_BUILD_CLI   "Build the circus2bmson CLI"      ON)
-option(C2B_BUILD_TOOLS "Build diagnostic / spike tools"  ON)
-option(C2B_BUILD_TESTS "Enable tests (ctest)"            ON)
+option(C2B_BUILD_CLI   "Build the circus2bmson CLI"            ON)
+option(C2B_BUILD_TOOLS "Build diagnostic / spike tools"        ON)
+option(C2B_BUILD_TESTS "Enable tests (ctest)"                  ON)
+# OFF by default so the headless library/CLI build (and BmsTWO embedding) stay
+# free of GUI dependencies; enable with -DC2B_BUILD_GUI=ON (needs GLFW).
+option(C2B_BUILD_GUI   "Build the circus2bmson GUI (Dear ImGui)" OFF)
 
 # ---------------------------------------------------------------------------
 # Dependencies
@@ -44,6 +47,10 @@ endif()
 if(C2B_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+if(C2B_BUILD_GUI)
+  add_subdirectory(gui)
 endif()
 
 message(STATUS "circus2bmson ${PROJECT_VERSION}  (libopenmpt ${LIBOPENMPT_VERSION})")

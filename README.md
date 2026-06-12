@@ -65,6 +65,20 @@ ctest --test-dir build --output-on-failure
 `nlohmann/json` and `dr_wav` are vendored under `third_party/`, so libopenmpt
 and libvorbis are the only external dependencies.
 
+### GUI (early / minimal)
+
+An optional desktop front-end (Dear ImGui, vendored) is built with
+`-DC2B_BUILD_GUI=ON` (needs GLFW: apt `libglfw3-dev` + `libgl1-mesa-dev`, or
+MSYS2 `mingw-w64-ucrt-x86_64-glfw`). It currently does one thing — drag a module
+onto the window and it converts with default options — with the option widgets
+and a (MIDI) soundfont picker to follow. The prebuilt `circus2bmson-gui.exe`
+ships in the same `circus2bmson-windows-x64` artifact.
+
+```sh
+cmake -S . -B build -G Ninja -DC2B_BUILD_GUI=ON && cmake --build build
+./build/gui/circus2bmson-gui
+```
+
 ### Windows
 
 A prebuilt `circus2bmson.exe` (plus its DLLs and the sample modules) is
@@ -140,4 +154,4 @@ third_party/           vendored single-header deps (nlohmann/json, dr_wav)
 Project code: see repository license. Test fixtures under `tests/fixtures/`
 are Public Domain modules from The Mod Archive — see
 [`tests/fixtures/README.md`](tests/fixtures/README.md). Vendored deps:
-nlohmann/json (MIT), dr_wav (public domain / MIT-0).
+nlohmann/json (MIT), dr_wav (public domain / MIT-0), Dear ImGui (MIT, GUI only).

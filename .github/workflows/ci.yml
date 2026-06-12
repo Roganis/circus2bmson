@@ -14,10 +14,11 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libopenmpt-dev libvorbis-dev cmake ninja-build
+          sudo apt-get install -y libopenmpt-dev libvorbis-dev libglfw3-dev \
+            libgl1-mesa-dev cmake ninja-build
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DC2B_BUILD_GUI=ON
 
       - name: Build
         run: cmake --build build
@@ -45,9 +46,10 @@ jobs:
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-libopenmpt
             mingw-w64-ucrt-x86_64-libvorbis
+            mingw-w64-ucrt-x86_64-glfw
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DC2B_BUILD_GUI=ON
 
       - name: Build
         run: cmake --build build
@@ -59,8 +61,10 @@ jobs:
         run: |
           mkdir -p dist
           cp build/cli/circus2bmson.exe dist/
-          # Copy every MSYS2-provided DLL the exe transitively needs.
-          for d in $(ldd build/cli/circus2bmson.exe | grep -i ucrt64 | awk '{print $3}'); do
+          cp build/gui/circus2bmson-gui.exe dist/
+          # Copy every MSYS2-provided DLL the CLI and GUI transitively need.
+          for d in $(ldd build/cli/circus2bmson.exe build/gui/circus2bmson-gui.exe \
+                       | grep -i ucrt64 | awk '{print $3}' | sort -u); do
             cp -u "$d" dist/
           done
           # Include the sample modules so it can be tried immediately.
