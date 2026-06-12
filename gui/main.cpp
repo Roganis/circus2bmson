@@ -1,9 +1,11 @@
-// Minimal circus2bmson GUI (vertical slice): pick a module (Browse or drag it
-// onto the window) and convert it with default options, showing the result.
-// The full option widgets and a (MIDI) soundfont picker land next; this slice
-// proves the Dear ImGui + GLFW build and the CI/artifact path.
+// Minimal circus2bmson GUI (vertical slice): point it at a module (type/paste a
+// path, Browse, or drag one onto the window) and convert it with default
+// options. The path field works with no external deps; Browse needs a system
+// dialog helper (zenity/kdialog); drag-drop needs GLFW's X11 backend. Full
+// option widgets and a (MIDI) soundfont picker land next.
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <mutex>
@@ -23,13 +25,17 @@
 namespace {
 
 struct AppState {
-  std::string input_path;
-  std::mutex mtx;  // guards `log`
+  char input[1024] = {0};  // module path (only touched on the main thread)
+  std::mutex mtx;          // guards `log`
   std::string log;
   std::atomic<bool> busy{false};
 };
 
 AppState* g_app = nullptr;  // for the GLFW drop callback (C function pointer)
+
+void set_input(AppState& s, const std::string& path) {
+  std::snprintf(s.input, sizeof(s.input), "%s", path.c_str());
+}
 
 void log_line(AppState& s, const std::string& line) {
   std::lock_guard<std::mutex> lk(s.mtx);
@@ -65,10 +71,11 @@ void convert_worker(AppState* s, std::string input) {
 }
 
 void start_convert(AppState& s) {
-  if (s.busy || s.input_path.empty()) return;
+  if (s.busy || s.input[0] == '\0') return;
   s.busy = true;
-  log_line(s, "converting " + s.input_path + " ...");
-  std::thread(convert_worker, &s, s.input_path).detach();
+  std::string in = s.input;
+  log_line(s, "converting " + in + " ...");
+  std::thread(convert_worker, &s, std::move(in)).detach();
 }
 
 void pick_input(AppState& s) {
@@ -79,29 +86,35 @@ void pick_input(AppState& s) {
                   "*.ptm *.stm *.ult *.far",
                   "All files", "*"})
                  .result();
-  if (!sel.empty()) s.input_path = sel[0];
+  if (!sel.empty()) set_input(s, sel[0]);
 }
 
 void drop_callback(GLFWwindow*, int count, const char** paths) {
-  if (g_app && count > 0) g_app->input_path = paths[0];
+  if (g_app && count > 0) set_input(*g_app, paths[0]);
 }
 
 void glfw_error(int code, const char* desc) {
   std::fprintf(stderr, "glfw error %d: %s\n", code, desc);
 }
 
+bool init_glfw() {
+#if defined(__linux__) && defined(GLFW_PLATFORM_X11)
+  // Prefer X11 (drag-drop only works on GLFW's X11 backend; under Wayland it
+  // runs via XWayland). Fall back to the default platform if X11 is
+  // unavailable -- e.g. a Wayland session with no XWayland -- so the app still
+  // starts (the path field and Browse still work there).
+  glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+  if (glfwInit()) return true;
+  glfwInitHint(GLFW_PLATFORM, GLFW_ANY_PLATFORM);
+#endif
+  return glfwInit();
+}
+
 }  // namespace
 
 int main() {
   glfwSetErrorCallback(glfw_error);
-
-#if defined(__linux__) && defined(GLFW_PLATFORM_X11)
-  // GLFW delivers file-drop events only on its X11 backend, not on Wayland, so
-  // prefer X11 (XWayland under a Wayland session) and drag-and-drop works.
-  glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-#endif
-
-  if (!glfwInit()) {
+  if (!init_glfw()) {
     std::fprintf(stderr, "failed to initialise GLFW\n");
     return 1;
   }
@@ -119,7 +132,7 @@ int main() {
 #endif
 
   GLFWwindow* window =
-      glfwCreateWindow(680, 460, "circus2bmson", nullptr, nullptr);
+      glfwCreateWindow(700, 480, "circus2bmson", nullptr, nullptr);
   if (!window) {
     std::fprintf(stderr, "failed to create window\n");
     glfwTerminate();
@@ -145,13 +158,13 @@ int main() {
     ImGui::NewFrame();
 
     ImGui::Begin("circus2bmson");
-    ImGui::TextUnformatted("Choose a module, or drag one onto the window.");
+    ImGui::TextUnformatted("Module path (type/paste, Browse, or drag a file in):");
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputTextWithHint("##path", "/path/to/song.mod", state.input,
+                             sizeof(state.input));
     if (ImGui::Button("Browse...")) pick_input(state);
     ImGui::SameLine();
-    ImGui::Text("input: %s",
-                state.input_path.empty() ? "(none)" : state.input_path.c_str());
-
-    ImGui::BeginDisabled(state.busy || state.input_path.empty());
+    ImGui::BeginDisabled(state.busy || state.input[0] == '\0');
     if (ImGui::Button("Convert")) start_convert(state);
     ImGui::EndDisabled();
     ImGui::SameLine();
