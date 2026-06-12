@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=circus2bmson
+GenericName=Tracker to bmson converter
+Comment=Convert tracker modules (MOD/XM/S3M/IT/...) to the bmson format
+Exec=circus2bmson-gui
+Icon=circus2bmson
+Terminal=false
+Categories=AudioVideo;Audio;Utility;

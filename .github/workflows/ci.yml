@@ -15,7 +15,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libopenmpt-dev libvorbis-dev libglfw3-dev \
-            libgl1-mesa-dev cmake ninja-build
+            libgl1-mesa-dev patchelf file cmake ninja-build
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DC2B_BUILD_GUI=ON
@@ -25,6 +25,26 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      - name: Build AppImage
+        run: |
+          cd build
+          curl -sSL -o linuxdeploy-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -sSL -o linuxdeploy-plugin-appimage-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage
+          chmod +x linuxdeploy*.AppImage
+          export APPIMAGE_EXTRACT_AND_RUN=1 PATH="$PWD:$PATH" OUTPUT=circus2bmson-x86_64.AppImage
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir \
+            -e gui/circus2bmson-gui -e cli/circus2bmson \
+            -d ../packaging/circus2bmson.desktop -i ../packaging/circus2bmson.png \
+            --output appimage
+          ls -la circus2bmson-x86_64.AppImage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: circus2bmson-linux-x86_64
+          path: build/circus2bmson-x86_64.AppImage
 
   windows:
     runs-on: windows-latest

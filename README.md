@@ -71,8 +71,14 @@ An optional desktop front-end (Dear ImGui, vendored) is built with
 `-DC2B_BUILD_GUI=ON` (needs GLFW: apt `libglfw3-dev` + `libgl1-mesa-dev`, or
 MSYS2 `mingw-w64-ucrt-x86_64-glfw`). It currently does one thing — drag a module
 onto the window and it converts with default options — with the option widgets
-and a (MIDI) soundfont picker to follow. The prebuilt `circus2bmson-gui.exe`
-ships in the same `circus2bmson-windows-x64` artifact.
+and a (MIDI) soundfont picker to follow.
+
+CI publishes prebuilt binaries: `circus2bmson-gui.exe` in the
+`circus2bmson-windows-x64` artifact, and a Linux
+**`circus2bmson-x86_64.AppImage`** (CLI + GUI bundled) in the
+`circus2bmson-linux-x86_64` artifact. Run the AppImage directly (it needs FUSE —
+`fuse2` on most distros; otherwise
+`./circus2bmson-x86_64.AppImage --appimage-extract-and-run`).
 
 ```sh
 cmake -S . -B build -G Ninja -DC2B_BUILD_GUI=ON && cmake --build build
