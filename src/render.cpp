@@ -184,12 +184,10 @@ RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes_u8,
 
     for (std::size_t k = 0; k < idx.size(); ++k) {
       const ScoreNote& n = score.notes[idx[k]];
-      const long start =
-          std::min<long>(score.rows[n.row_index].frame, total_frames - 1);
+      const long start = std::min<long>(n.frame, total_frames - 1);
       const long end =
           k + 1 < idx.size()
-              ? std::min<long>(score.rows[score.notes[idx[k + 1]].row_index].frame,
-                               total_frames)
+              ? std::min<long>(score.notes[idx[k + 1]].frame, total_frames)
               : total_frames;
       if (start < 0 || end <= start) continue;
 
@@ -251,13 +249,10 @@ double reconstruct_residual_db(const std::vector<std::uint8_t>& bytes_u8,
         render_channel(bytes, c, score, volume_ramping);
     const long frames = static_cast<long>(stem.size() / 2);
     for (std::size_t k = 0; k < idx.size(); ++k) {
-      const long start =
-          std::min<long>(score.rows[score.notes[idx[k]].row_index].frame,
-                         frames - 1);
+      const long start = std::min<long>(score.notes[idx[k]].frame, frames - 1);
       const long end =
           k + 1 < idx.size()
-              ? std::min<long>(score.rows[score.notes[idx[k + 1]].row_index].frame,
-                               frames)
+              ? std::min<long>(score.notes[idx[k + 1]].frame, frames)
               : frames;
       if (start < 0 || end <= start) continue;
       slices[idx[k]] = make_slice(stem, start, end);

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 #include <libopenmpt/libopenmpt.hpp>
 
@@ -21,6 +22,17 @@ double current_tempo(const openmpt::module& m) {
 #else
   return static_cast<double>(m.get_current_tempo());
 #endif
+}
+
+// Note-delay ticks for one cell: EDx on MOD/XM, SDx on S3M/IT (both show the
+// delay as effect-parameter 0xDx). 0 when the cell carries no note delay.
+int note_delay_ticks(const openmpt::module& m, int pattern, int row, int ch) {
+  const std::string fx = m.format_pattern_row_channel_command(
+      pattern, row, ch, openmpt::module::command_effect);
+  if (fx.empty() || (fx[0] != 'E' && fx[0] != 'S')) return 0;
+  const std::uint8_t p = m.get_pattern_row_channel_command(
+      pattern, row, ch, openmpt::module::command_parameter);
+  return ((p & 0xF0) == 0xD0) ? (p & 0x0F) : 0;
 }
 
 }  // namespace
@@ -181,16 +193,39 @@ Score read_score(const std::vector<std::uint8_t>& bytes_u8, int max_loops) {
       cur_bpm = bpm;
     }
 
-    // Note-ons (instrument numbers latch like tracker playback).
+    // Note-ons (instrument numbers latch like tracker playback). A note-delay
+    // effect shifts the note part-way into the row -- both in pulses and in the
+    // frame its keysound is sliced from -- so off-beat notes land correctly.
+    const long row_dur =
+        (i + 1 < raw.size())
+            ? std::max<long>(1, raw[i + 1].frame - rw.frame)
+            : std::max<long>(1, std::lround(kRate * 2.5 * rw.speed / rw.tempo));
+    const int speed_ticks = std::max(1, static_cast<int>(std::lround(rw.speed)));
     for (int ch = 0; ch < s.channels; ++ch) {
       const int iv = m.get_pattern_row_channel_command(
           rw.pattern, rw.row, ch, openmpt::module::command_instrument);
       if (iv != 0) latched_instr[ch] = iv;
       const int note = m.get_pattern_row_channel_command(
           rw.pattern, rw.row, ch, openmpt::module::command_note);
-      if (note >= 1 && note <= 128)
-        s.notes.push_back(
-            {static_cast<int>(i), ch, note, latched_instr[ch], pulse});
+      if (note < 1 || note > 128) continue;
+
+      int delay = std::min(note_delay_ticks(m, rw.pattern, rw.row, ch),
+                           speed_ticks - 1);
+      long pulse_off = 0, frame_off = 0;
+      if (delay > 0) {
+        const double f = static_cast<double>(delay) / speed_ticks;
+        pulse_off = std::min<long>(std::lround(f * s.pulses_per_row),
+                                   s.pulses_per_row - 1);
+        frame_off = std::min<long>(std::lround(f * row_dur), row_dur - 1);
+      }
+      ScoreNote sn;
+      sn.row_index = static_cast<int>(i);
+      sn.channel = ch;
+      sn.note = note;
+      sn.instrument = latched_instr[ch];
+      sn.pulse = pulse + pulse_off;
+      sn.frame = rw.frame + frame_off;
+      s.notes.push_back(sn);
     }
   }
   s.total_pulses = static_cast<long>(s.rows.size()) * s.pulses_per_row;

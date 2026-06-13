@@ -48,8 +48,11 @@ slides keep the grid exactly aligned with the rendered audio.
       folders).
 - [ ] **M3** — validate in beatoraja (drag into BmsONE; confirm the
       convert -> chart workflow).
-- [ ] **M4** — remaining refinements: sub-row precision (note delay), macOS CI.
-      (Windows CI + prebuilt `.exe` artifact: done.)
+- [x] **Sub-row precision** — the note-delay effect (EDx on MOD/XM, SDx on
+      S3M/IT) places a note part-way into its row, in both pulses and the
+      keysound's onset frame, so off-beat notes land correctly.
+- [ ] **M4** — remaining refinements: macOS CI. (Windows CI + prebuilt `.exe`
+      artifact: done.)
 
 ## Building
 

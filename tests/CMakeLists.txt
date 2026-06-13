@@ -80,6 +80,13 @@ target_compile_definitions(test_midi_convert PRIVATE
   C2B_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/test_out")
 add_test(NAME midi_convert COMMAND test_midi_convert)
 
+# Sub-row precision: note-delay (EDx/SDx) places notes off the row grid.
+add_executable(test_subrow_delay test_subrow_delay.cpp)
+target_link_libraries(test_subrow_delay PRIVATE circus2bmson::circus2bmson)
+target_compile_definitions(test_subrow_delay PRIVATE
+  C2B_FIXTURE_DIR="${C2B_FIXTURE_DIR}")
+add_test(NAME subrow_delay COMMAND test_subrow_delay)
+
 # MIDI player engine: headless render(), levels, per-channel gain separation.
 add_executable(test_midi_player test_midi_player.cpp)
 target_link_libraries(test_midi_player PRIVATE circus2bmson::circus2bmson)

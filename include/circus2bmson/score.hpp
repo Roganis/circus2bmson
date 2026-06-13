@@ -18,7 +18,8 @@
 // with the rendered keysounds: nominal bpm = 6 * tempo / speed when the
 // measured duration agrees with it, otherwise the measured per-row bpm
 // (15 / row_seconds) -- which transparently covers pattern delay and tempo
-// slides.
+// slides. The note-delay effect (EDx on MOD/XM, SDx on S3M/IT) places a note
+// part-way into its row, both in pulses and in its slice onset frame.
 namespace circus2bmson {
 
 struct PlayedRow {
@@ -34,6 +35,7 @@ struct ScoreNote {
   int note = 0;        // libopenmpt note value (1..120; 1 = C-0)
   int instrument = 0;  // effective instrument/sample number (latched), 0 if none
   long pulse = 0;
+  long frame = 0;      // onset frame in the rendered stream (sub-row aware)
 };
 
 struct BpmEvent {

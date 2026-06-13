@@ -1,6 +1,7 @@
 #include "circus2bmson/timeline.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace circus2bmson {
@@ -81,8 +82,16 @@ Timeline build_timeline(const Module& mod, const TimelineOptions& opts) {
       if (cell.sample != 0) last_sample[ch] = cell.sample;
       if (cell.period != 0) {
         const std::uint8_t s = cell.sample != 0 ? cell.sample : last_sample[ch];
-        tl.notes.push_back(
-            {o, r, ch, s, cell.period, pulse});
+        // Note delay (EDx) shifts the note part-way into the row.
+        long sub = 0;
+        if (cell.effect == 0xE && (cell.param >> 4) == 0xD) {
+          const int d = std::min<int>(cell.param & 0x0F, speed - 1);
+          if (d > 0)
+            sub = std::min<long>(
+                std::lround(static_cast<double>(d) / speed * kPulsesPerRow),
+                kPulsesPerRow - 1);
+        }
+        tl.notes.push_back({o, r, ch, s, cell.period, pulse + sub});
       }
     }
 
