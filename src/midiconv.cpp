@@ -14,6 +14,15 @@
 #include <tuple>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
+
 #include <dr_libs/dr_wav.h>
 
 #include "circus2bmson/bmson.hpp"
@@ -83,14 +92,45 @@ std::vector<std::int16_t> to_pcm(const std::vector<float>& f) {
   return pcm;
 }
 
+std::string exe_dir() {
+#if defined(_WIN32)
+  char buf[MAX_PATH];
+  const DWORD n = GetModuleFileNameA(nullptr, buf, sizeof(buf));
+  if (n == 0 || n >= sizeof(buf)) return "";
+  return std::filesystem::path(std::string(buf, n)).parent_path().string();
+#elif defined(__linux__)
+  char buf[4096];
+  const ssize_t n = ::readlink("/proc/self/exe", buf, sizeof(buf));
+  if (n <= 0) return "";
+  return std::filesystem::path(std::string(buf, static_cast<std::size_t>(n)))
+      .parent_path()
+      .string();
+#else
+  return "";
+#endif
+}
+
 std::string resolve_soundfont(const std::string& given) {
   namespace fs = std::filesystem;
+  auto exists = [](const std::string& p) { return !p.empty() && fs::exists(p); };
+
   if (!given.empty()) {
     if (fs::exists(given)) return given;
     throw std::runtime_error("SoundFont not found: " + given);
   }
-  if (const char* env = std::getenv("C2B_SOUNDFONT"))
-    if (env[0] && fs::exists(env)) return env;
+  if (const char* env = std::getenv("C2B_SOUNDFONT"); env && exists(env))
+    return env;
+  // Bundled default (FluidR3_GM.sf2): AppImage, then beside the executable.
+  if (const char* ad = std::getenv("APPDIR")) {
+    const std::string p = std::string(ad) + "/usr/share/sounds/sf2/FluidR3_GM.sf2";
+    if (exists(p)) return p;
+  }
+  if (const std::string ed = exe_dir(); !ed.empty()) {
+    for (const char* rel :
+         {"/FluidR3_GM.sf2", "/../share/sounds/sf2/FluidR3_GM.sf2"})
+      if (const std::string p = ed + rel; exists(p)) return p;
+  }
+  // Common system locations.
   const char* candidates[] = {
       "/usr/share/sounds/sf2/FluidR3_GM.sf2",
       "/usr/share/sounds/sf2/TimGM6mb.sf2",
@@ -99,7 +139,7 @@ std::string resolve_soundfont(const std::string& given) {
       "/usr/share/soundfonts/default.sf2",
   };
   for (const char* c : candidates)
-    if (fs::exists(c)) return c;
+    if (exists(c)) return c;
   throw std::runtime_error(
       "no SoundFont found; supply one with --soundfont or the GUI picker "
       "(MIDI files carry no audio of their own)");

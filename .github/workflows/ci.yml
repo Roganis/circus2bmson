@@ -6,10 +6,32 @@ on:
   pull_request:
 
 jobs:
-  linux:
+  # Fetch the (large) default SoundFont once and share it to the build jobs.
+  soundfont:
     runs-on: ubuntu-latest
     steps:
+      - name: Fetch FluidR3_GM SoundFont
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fluid-soundfont-gm
+          mkdir sf
+          cp /usr/share/sounds/sf2/FluidR3_GM.sf2 sf/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fluidr3-soundfont
+          path: sf/FluidR3_GM.sf2
+          retention-days: 1
+
+  linux:
+    runs-on: ubuntu-latest
+    needs: soundfont
+    steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fluidr3-soundfont
+          path: sf
 
       - name: Install dependencies
         run: |
@@ -30,6 +52,9 @@ jobs:
       - name: Build AppImage
         run: |
           cd build
+          # Bundle the default SoundFont so MIDI works out of the box.
+          mkdir -p AppDir/usr/share/sounds/sf2
+          cp ../sf/FluidR3_GM.sf2 AppDir/usr/share/sounds/sf2/
           curl -sSL -o linuxdeploy-x86_64.AppImage \
             https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           curl -sSL -o linuxdeploy-plugin-appimage-x86_64.AppImage \
@@ -49,11 +74,17 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    needs: soundfont
     defaults:
       run:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fluidr3-soundfont
+          path: sf
 
       - uses: msys2/setup-msys2@v2
         with:
@@ -89,8 +120,9 @@ jobs:
                        | grep -i ucrt64 | awk '{print $3}' | sort -u); do
             cp -u "$d" dist/
           done
-          # Include the sample modules so it can be tried immediately.
+          # Include the sample modules and the default SoundFont (for MIDI).
           cp tests/fixtures/*.mod dist/ || true
+          cp sf/FluidR3_GM.sf2 dist/
           ls -la dist/
 
       - uses: actions/upload-artifact@v4

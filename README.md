@@ -119,9 +119,11 @@ cmake -S . -B build -G Ninja && cmake --build build
 ```
 
 MIDI files carry no audio of their own, so the timbres come from a **SoundFont**
-(`.sf2`): pass `--soundfont` (or the GUI picker), set `C2B_SOUNDFONT`, or install
-one system-wide (e.g. `/usr/share/sounds/sf2/`). Each note is rendered in
-isolation through FluidSynth and deduplicated like any other keysound.
+(`.sf2`). The prebuilt binaries bundle **FluidR3_GM**, so MIDI works out of the
+box; override it with `--soundfont` (or the GUI picker), `C2B_SOUNDFONT`, or a
+system soundfont (e.g. `/usr/share/sounds/sf2/`). Each note is rendered in
+isolation through FluidSynth and deduplicated like any other keysound. (The
+SoundFont is bundled by CI into the artifacts, not committed to the repo.)
 
 With no `-o`, output goes to a folder named after the module, beside it — so on
 Windows you can just **drag a module onto `circus2bmson.exe`** and get a
