@@ -16,6 +16,8 @@ add_library(circus2bmson
   midiconv.cpp
   bmson.cpp
   render.cpp
+  onset.cpp
+  chip.cpp
   oggenc.cpp
   dr_wav_impl.cpp
   convert.cpp
@@ -31,3 +33,9 @@ target_link_libraries(circus2bmson
 
 target_compile_definitions(circus2bmson
   PRIVATE C2B_VERSION="${PROJECT_VERSION}")
+
+# Chip backend: only real when libgme is present (chip.cpp is otherwise a stub).
+if(LIBGME_FOUND)
+  target_link_libraries(circus2bmson PRIVATE PkgConfig::LIBGME)
+  target_compile_definitions(circus2bmson PRIVATE C2B_HAVE_LIBGME)
+endif()

@@ -51,23 +51,35 @@ slides keep the grid exactly aligned with the rendered audio.
 - [x] **Sub-row precision** — the note-delay effect (EDx on MOD/XM, SDx on
       S3M/IT) places a note part-way into its row, in both pulses and the
       keysound's onset frame, so off-beat notes land correctly.
+- [ ] **Chip formats (game-music-emu)** — spike in place: libgme renders each
+      chip voice in isolation and `scan_chip` recovers note onsets from the
+      audio (audio-domain detection). Next: onsets -> keysounds on a pulse grid
+      -> bmson, then a backend dispatch by extension.
 - [ ] **M4** — remaining refinements: macOS CI. (Windows CI + prebuilt `.exe`
       artifact: done.)
 
 ## Building
 
-Requires a C++17 compiler, CMake ≥ 3.16, libopenmpt and libvorbis.
+Requires a C++17 compiler, CMake ≥ 3.16, libopenmpt, libvorbis and FluidSynth
+(for MIDI). game-music-emu (libgme) is optional and enables the chip-music
+backend (NSF/GBS/VGM/...).
 
 ```sh
-sudo apt-get install -y libopenmpt-dev libvorbis-dev cmake ninja-build  # Debian/Ubuntu
-sudo pacman -S --needed libopenmpt libvorbis cmake ninja gcc            # Arch
+# Debian/Ubuntu
+sudo apt-get install -y libopenmpt-dev libvorbis-dev libfluidsynth-dev \
+  libgme-dev cmake ninja-build
+# Arch
+sudo pacman -S --needed libopenmpt libvorbis fluidsynth game-music-emu \
+  cmake ninja gcc
 cmake -S . -B build -G Ninja
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-`nlohmann/json` and `dr_wav` are vendored under `third_party/`, so libopenmpt
-and libvorbis are the only external dependencies.
+`nlohmann/json`, `dr_wav` and `miniaudio` (GUI) are vendored under
+`third_party/`. libopenmpt, libvorbis and FluidSynth are required system
+packages; game-music-emu (libgme) is an optional one — without it the chip
+backend compiles to a stub.
 
 ### GUI (early / minimal)
 
