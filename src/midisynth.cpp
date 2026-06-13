@@ -46,13 +46,19 @@ MidiSynth::~MidiSynth() {
 }
 
 std::vector<float> MidiSynth::render_note(int program, int key, int velocity,
-                                          bool drum, long duration_frames) {
+                                          bool drum, long duration_frames,
+                                          int volume, int expression, int pan,
+                                          float gain) {
   auto* synth = static_cast<fluid_synth_t*>(synth_);
   std::vector<float> out;
   if (!synth || sfid_ < 0) return out;
 
   const int chan = drum ? 9 : 0;
   fluid_synth_all_sounds_off(synth, -1);  // clear any lingering voices
+  // Channel controllers shape the timbre/loudness, so set them before the note.
+  fluid_synth_cc(synth, chan, 7, volume);
+  fluid_synth_cc(synth, chan, 11, expression);
+  fluid_synth_cc(synth, chan, 10, pan);
   fluid_synth_program_select(synth, chan, sfid_, drum ? 128 : 0,
                              drum ? 0 : program);
   fluid_synth_noteon(synth, chan, key, velocity);
@@ -75,6 +81,8 @@ std::vector<float> MidiSynth::render_note(int program, int key, int velocity,
     for (float v : blk) peak = std::max(peak, std::fabs(v));
     if (peak < kSilence) break;
   }
+  if (gain != 1.0f)
+    for (float& v : out) v *= gain;
   return out;
 }
 

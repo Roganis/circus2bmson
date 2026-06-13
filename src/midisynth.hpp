@@ -20,9 +20,13 @@ class MidiSynth {
 
   // Render one note to interleaved stereo float: the note held for
   // `duration_frames`, then its release tail until it decays. Drums use the
-  // GM percussion bank (key selects the instrument).
+  // GM percussion bank (key selects the instrument). `volume`/`expression`/`pan`
+  // are the channel controllers (CC7/CC11/CC10) applied before the note sounds;
+  // `gain` is an extra linear multiplier baked into the result (the user mix).
   std::vector<float> render_note(int program, int key, int velocity, bool drum,
-                                 long duration_frames);
+                                 long duration_frames, int volume = 100,
+                                 int expression = 127, int pan = 64,
+                                 float gain = 1.0f);
 
  private:
   void* settings_ = nullptr;  // fluid_settings_t*

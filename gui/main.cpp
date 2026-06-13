@@ -3,13 +3,18 @@
 // convert_mod_file the CLI uses; conversion runs on a worker thread so the
 // window stays responsive.
 #include <atomic>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <GLFW/glfw3.h>
 
@@ -20,6 +25,9 @@
 
 #include "circus2bmson/circus2bmson.hpp"
 #include "circus2bmson/convert.hpp"
+#include "circus2bmson/midiplayer.hpp"
+
+#include "audio.hpp"
 
 namespace {
 
@@ -33,6 +41,15 @@ struct AppState {
   int naming = 0;             // 0 = Channel, 1 = Instrument, 2 = Lane
   int max_loops = 1;
   bool volume_ramping = false;
+  bool honor_cc = true;       // apply the MIDI's own CC7/CC11 volume
+
+  // MIDI preview / mixer (live audition). Only the UI thread touches these; the
+  // device pulls audio from `player` on its own thread and is always torn down
+  // before `player` is reset.
+  std::unique_ptr<circus2bmson::MidiPlayer> player;
+  AudioDevice* device = nullptr;
+  std::string loaded_path;    // input path the current player was built from
+  std::string preview_status;
 
   std::mutex mtx;             // guards `log`
   std::string log;
@@ -55,6 +72,67 @@ void log_line(AppState& s, const std::string& line) {
 std::string default_output_dir(const std::string& input) {
   const std::filesystem::path in(input);
   return (in.parent_path() / in.stem()).string();
+}
+
+bool is_midi_path(const std::string& p) {
+  const auto dot = p.find_last_of('.');
+  if (dot == std::string::npos) return false;
+  std::string ext = p.substr(dot);
+  for (char& c : ext) c = static_cast<char>(std::tolower((unsigned char)c));
+  return ext == ".mid" || ext == ".midi";
+}
+
+void stop_preview(AppState& s) {
+  audio_close(s.device);  // stops the audio thread before the player is freed
+  s.device = nullptr;
+  s.player.reset();
+  s.loaded_path.clear();
+}
+
+// Load the current input as a MIDI, build the player + open the audio device.
+void load_preview(AppState& s) {
+  stop_preview(s);
+  try {
+    std::ifstream f(s.input, std::ios::binary);
+    if (!f) throw std::runtime_error("cannot open file");
+    std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(f)),
+                                    std::istreambuf_iterator<char>());
+    const std::string sf = circus2bmson::resolve_soundfont(s.soundfont);
+    s.player = std::make_unique<circus2bmson::MidiPlayer>(sf, bytes, 44100);
+    s.player->set_honor_cc(s.honor_cc);
+    s.device = audio_open(s.player.get());
+    if (!s.device) throw std::runtime_error("no audio output device available");
+    s.loaded_path = s.input;
+    s.preview_status = std::to_string(s.player->channels().size()) +
+                       " channels, " +
+                       std::to_string(s.player->instruments().size()) +
+                       " instruments";
+  } catch (const std::exception& e) {
+    stop_preview(s);
+    s.preview_status = std::string("error: ") + e.what();
+  }
+}
+
+// One mixer row: label, live meter, gain slider. Channel row when channel >= 0.
+void mixer_row(AppState& s, const circus2bmson::MidiPlayer::Track& t) {
+  const bool is_chan = t.channel >= 0;
+  ImGui::PushID(is_chan ? t.channel : 1000 + t.program);
+  const float lvl = is_chan ? s.player->channel_level(t.channel)
+                            : s.player->instrument_level(t.program);
+  ImGui::TextUnformatted(t.name.c_str());
+  ImGui::SameLine(250.0f);
+  ImGui::ProgressBar(lvl, ImVec2(110, 0), "");
+  ImGui::SameLine();
+  float g = is_chan ? s.player->channel_gain(t.channel)
+                    : s.player->instrument_gain(t.program);
+  ImGui::SetNextItemWidth(150.0f);
+  if (ImGui::SliderFloat("##gain", &g, 0.0f, 2.0f, "%.2fx")) {
+    if (is_chan)
+      s.player->set_channel_gain(t.channel, g);
+    else
+      s.player->set_instrument_gain(t.program, g);
+  }
+  ImGui::PopID();
 }
 
 void convert_worker(AppState* s, std::string input,
@@ -96,7 +174,13 @@ void start_convert(AppState& s) {
                                          : KeysoundNaming::Channel;
   opts.max_loops = s.max_loops < 1 ? 1 : s.max_loops;
   opts.volume_ramping = s.volume_ramping;
-  opts.soundfont_path = s.soundfont;  // inert until the MIDI backend exists
+  opts.soundfont_path = s.soundfont;  // used for MIDI input
+  // Bake the live mixer settings into the keysounds; otherwise just honour the
+  // file's own volume/expression by default.
+  if (s.player)
+    opts.midi_mix = s.player->snapshot();
+  else
+    opts.midi_mix.honor_cc = s.honor_cc;
 
   s.busy = true;
   log_line(s, "converting " + std::string(s.input) + " ...");
@@ -201,6 +285,50 @@ void draw_ui(AppState& s) {
   if (path_row("##sf", "(bundled default)", s.soundfont, sizeof(s.soundfont)))
     pick_soundfont(s);
 
+  // --- MIDI preview / mixer (MIDI input only) ---
+  if (is_midi_path(s.input)) {
+    if (s.player && s.loaded_path != s.input) stop_preview(s);  // file changed
+
+    ImGui::Dummy(ImVec2(0, 4));
+    ImGui::SeparatorText("MIDI preview / mixer");
+    if (!s.player) {
+      if (ImGui::Button("Load preview")) load_preview(s);
+      ImGui::SameLine();
+      ImGui::TextDisabled("audition and balance channels / instruments");
+      if (!s.preview_status.empty())
+        ImGui::TextUnformatted(s.preview_status.c_str());
+    } else {
+      if (ImGui::Button(s.player->playing() ? "Stop" : "Play")) s.player->toggle();
+      ImGui::SameLine();
+      if (ImGui::Button("Reload")) load_preview(s);
+      ImGui::SameLine();
+      const double dur = s.player->duration();
+      const double pos = s.player->position();
+      float frac = dur > 0.0 ? static_cast<float>(pos / dur) : 0.0f;
+      ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 120.0f);
+      if (ImGui::SliderFloat("##seek", &frac, 0.0f, 1.0f, "")) {
+        s.player->seek(static_cast<double>(frac) * dur);
+      }
+      ImGui::SameLine();
+      ImGui::Text("%.1f / %.1f s", pos, dur);
+
+      if (ImGui::Checkbox("Honor file volume/expression (CC7/CC11)", &s.honor_cc))
+        s.player->set_honor_cc(s.honor_cc);
+      ImGui::TextDisabled("Slider gains apply live and bake into Convert.");
+
+      ImGui::BeginChild("mixer", ImVec2(0, 200), true);
+      ImGui::SeparatorText("Channels");
+      for (const auto& t : s.player->channels()) mixer_row(s, t);
+      if (!s.player->instruments().empty()) {
+        ImGui::SeparatorText("Instruments");
+        for (const auto& t : s.player->instruments()) mixer_row(s, t);
+      }
+      ImGui::EndChild();
+    }
+  } else if (s.player) {
+    stop_preview(s);  // input switched away from MIDI
+  }
+
   ImGui::Dummy(ImVec2(0, 6));
   ImGui::BeginDisabled(s.busy || s.input[0] == '\0');
   if (ImGui::Button("Convert", ImVec2(120, 0))) start_convert(s);
@@ -240,7 +368,7 @@ int main() {
 #endif
 
   GLFWwindow* window =
-      glfwCreateWindow(720, 560, "circus2bmson", nullptr, nullptr);
+      glfwCreateWindow(720, 660, "circus2bmson", nullptr, nullptr);
   if (!window) {
     std::fprintf(stderr, "failed to create window\n");
     glfwTerminate();
@@ -277,6 +405,8 @@ int main() {
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     glfwSwapBuffers(window);
   }
+
+  stop_preview(state);  // stop the audio thread before tearing down
 
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplGlfw_Shutdown();

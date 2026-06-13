@@ -14,11 +14,14 @@ namespace circus2bmson {
 struct MidiNote {
   long tick_on = 0;
   long tick_off = 0;
-  int channel = 0;    // 0..15
-  int key = 0;        // 0..127
-  int velocity = 1;   // 1..127
-  int program = 0;    // GM program active on the channel at tick_on
-  bool drum = false;  // channel 9 (GM percussion)
+  int channel = 0;     // 0..15
+  int key = 0;         // 0..127
+  int velocity = 1;    // 1..127
+  int program = 0;     // GM program active on the channel at tick_on
+  bool drum = false;   // channel 9 (GM percussion)
+  int volume = 100;    // CC7  channel volume at tick_on (0..127, GM default 100)
+  int expression = 127;  // CC11 expression at tick_on (0..127, GM default 127)
+  int pan = 64;        // CC10 pan at tick_on (0..127, 64 = centre)
 };
 
 struct MidiTempo {

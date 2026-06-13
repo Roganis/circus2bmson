@@ -12,6 +12,7 @@ add_library(circus2bmson
   score.cpp
   midi.cpp
   midisynth.cpp
+  midiplayer.cpp
   midiconv.cpp
   bmson.cpp
   render.cpp

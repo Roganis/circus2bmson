@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <string>
 
+#include "circus2bmson/midimix.hpp"
 #include "circus2bmson/render.hpp"
 
 namespace circus2bmson {
@@ -15,9 +16,13 @@ struct ConvertOptions {
   KeysoundNaming keysound_naming = KeysoundNaming::Channel;
   bool volume_ramping = false;  // true -> libopenmpt smoothing (more dupes)
   AudioFormat audio_format = AudioFormat::Wav;
-  // For MIDI input (future): user-supplied SoundFont replacing the bundled
-  // default. Ignored by the tracker backends.
+  // For MIDI input: user-supplied SoundFont replacing the bundled default.
+  // Ignored by the tracker backends.
   std::string soundfont_path = "";
+  // For MIDI input: per-channel / per-instrument gains and whether to honour
+  // the file's own volume/expression controllers. Baked into the keysounds.
+  // Ignored by the tracker backends.
+  MidiMix midi_mix;
 };
 
 struct ConvertResult {
@@ -46,6 +51,11 @@ struct ConvertResult {
 // Throws std::exception on I/O or parse failure.
 ConvertResult convert_mod_file(const std::string& input_path,
                                const ConvertOptions& opts);
+
+// Resolve a SoundFont path for MIDI rendering: the given path if non-empty
+// (must exist), else $C2B_SOUNDFONT, the bundled FluidR3_GM.sf2, or a common
+// system location. Throws std::runtime_error if none is found.
+std::string resolve_soundfont(const std::string& given);
 
 }  // namespace circus2bmson
 

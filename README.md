@@ -73,8 +73,17 @@ An optional desktop front-end (Dear ImGui, vendored) is built with
 MSYS2 `mingw-w64-ucrt-x86_64-glfw`). It wraps the same conversion as the CLI:
 point it at a module (type/paste a path, **Browse…**, or drag one onto the
 window), set the options (WAV/OGG, keysound naming, max-loops, volume ramping,
-output folder) and Convert. A SoundFont (`.sf2`) picker is present for the
-forthcoming MIDI backend (inert for tracker input).
+output folder) and Convert. A SoundFont (`.sf2`) picker supplies the timbres for
+MIDI input (inert for tracker input).
+
+**MIDI preview / mixer.** When the input is a `.mid`/`.midi`, a **Load preview**
+button auditions it live through the SoundFont (real-time playback via
+miniaudio) with **Play/Stop** and a seek bar. Each MIDI channel and each
+instrument gets a **live level meter** and a **gain slider**; the converter
+already honours the file's own volume/expression (CC7/CC11), and any slider
+changes are **baked into the rendered keysounds** on Convert — so you can fix a
+file whose channel/instrument balance is off and hear the result before
+exporting.
 
 Input methods degrade gracefully by environment: the **path field** always
 works (no dependencies); **Browse…** needs a system dialog helper
@@ -177,4 +186,5 @@ third_party/           vendored single-header deps (nlohmann/json, dr_wav)
 Project code: see repository license. Test fixtures under `tests/fixtures/`
 are Public Domain modules from The Mod Archive — see
 [`tests/fixtures/README.md`](tests/fixtures/README.md). Vendored deps:
-nlohmann/json (MIT), dr_wav (public domain / MIT-0), Dear ImGui (MIT, GUI only).
+nlohmann/json (MIT), dr_wav (public domain / MIT-0), Dear ImGui (MIT, GUI only),
+miniaudio (public domain / MIT-0, GUI only).

@@ -127,6 +127,8 @@ std::string exe_dir() {
 #endif
 }
 
+}  // namespace
+
 std::string resolve_soundfont(const std::string& given) {
   namespace fs = std::filesystem;
   auto exists = [](const std::string& p) { return !p.empty() && fs::exists(p); };
@@ -161,6 +163,8 @@ std::string resolve_soundfont(const std::string& given) {
       "no SoundFont found; supply one with --soundfont or the GUI picker "
       "(MIDI files carry no audio of their own)");
 }
+
+namespace {
 
 // tick -> absolute seconds, from the tempo map.
 class TempoMap {
@@ -230,9 +234,11 @@ ConvertResult convert_midi(const std::vector<std::uint8_t>& bytes,
   struct Key {
     int program, key, vel, drum;
     long frames;
+    int vol, expr, pan, gainq;  // controllers + quantised user gain baked in
     bool operator<(const Key& o) const {
-      return std::tie(program, key, vel, drum, frames) <
-             std::tie(o.program, o.key, o.vel, o.drum, o.frames);
+      return std::tie(program, key, vel, drum, frames, vol, expr, pan, gainq) <
+             std::tie(o.program, o.key, o.vel, o.drum, o.frames, o.vol, o.expr,
+                      o.pan, o.gainq);
     }
   };
   std::map<Key, int> dedup;            // note signature -> keysound id
@@ -240,11 +246,19 @@ ConvertResult convert_midi(const std::vector<std::uint8_t>& bytes,
   std::vector<int> chan_seq(16, 0);
   long total_slices = 0;
 
+  const MidiMix& mix = opts.midi_mix;
   for (const MidiNote& n : song.notes) {
     ++total_slices;
     const double dur = tempo.seconds(n.tick_off) - tempo.seconds(n.tick_on);
     const long frames = std::max<long>(1, std::lround(dur * kRate));
-    const Key sig{n.program, n.key, n.velocity, n.drum ? 1 : 0, frames};
+    const int instr = instrument_of(n.program, n.drum);
+    const int vol = mix.honor_cc ? n.volume : 100;
+    const int expr = mix.honor_cc ? n.expression : 127;
+    const int pan = mix.honor_cc ? n.pan : 64;
+    const float gain = mix.user_gain(n.channel, instr);
+    const int gainq = static_cast<int>(std::lround(gain * 1000.0f));
+    const Key sig{n.program,  n.key, n.velocity, n.drum ? 1 : 0, frames,
+                  vol,        expr,  pan,         gainq};
 
     auto it = dedup.find(sig);
     int id;
@@ -265,8 +279,8 @@ ConvertResult convert_midi(const std::vector<std::uint8_t>& bytes,
       }
       const std::string name = base + ext;
       if (opts.render_audio) {
-        const std::vector<std::int16_t> pcm = to_pcm(
-            synth->render_note(n.program, n.key, n.velocity, n.drum, frames));
+        const std::vector<std::int16_t> pcm = to_pcm(synth->render_note(
+            n.program, n.key, n.velocity, n.drum, frames, vol, expr, pan, gain));
         if (opts.audio_format == AudioFormat::Ogg)
           write_ogg(dir + "/" + name, pcm, kRate);
         else

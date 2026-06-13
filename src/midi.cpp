@@ -75,6 +75,16 @@ MidiSong parse_smf(const std::vector<std::uint8_t>& bytes) {
     long tick = 0;
     std::uint8_t status = 0;
     int program[16] = {0};
+    // Per-channel continuous controllers, seeded with the GM power-on defaults
+    // so notes before any CC still snapshot sensible values.
+    int ctrl_vol[16];   // CC7  channel volume
+    int ctrl_expr[16];  // CC11 expression
+    int ctrl_pan[16];   // CC10 pan
+    for (int i = 0; i < 16; ++i) {
+      ctrl_vol[i] = 100;
+      ctrl_expr[i] = 127;
+      ctrl_pan[i] = 64;
+    }
     std::map<int, std::size_t> open;  // channel*128+key -> index of open note
 
     auto close_note = [&](int k, long off_tick) {
@@ -131,6 +141,9 @@ MidiSong parse_smf(const std::vector<std::uint8_t>& bytes) {
           n.velocity = vel;
           n.program = program[ch];
           n.drum = (ch == 9);
+          n.volume = ctrl_vol[ch];
+          n.expression = ctrl_expr[ch];
+          n.pan = ctrl_pan[ch];
           open[k] = s.notes.size();
           s.notes.push_back(n);
         }
@@ -141,7 +154,13 @@ MidiSong parse_smf(const std::vector<std::uint8_t>& bytes) {
       } else if (hi == 0xC0 || hi == 0xD0) {  // program / channel pressure: 1 byte
         const std::uint8_t v = r.u8();
         if (hi == 0xC0) program[ch] = v;
-      } else if (hi == 0xA0 || hi == 0xB0 || hi == 0xE0) {  // 2 data bytes
+      } else if (hi == 0xB0) {  // control change
+        const int cc = r.u8();
+        const int val = r.u8();
+        if (cc == 7) ctrl_vol[ch] = val;
+        else if (cc == 11) ctrl_expr[ch] = val;
+        else if (cc == 10) ctrl_pan[ch] = val;
+      } else if (hi == 0xA0 || hi == 0xE0) {  // aftertouch / pitch bend: 2 bytes
         r.u8();
         r.u8();
       } else {
