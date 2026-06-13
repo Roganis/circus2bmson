@@ -9,10 +9,21 @@ namespace circus2bmson {
 namespace {
 constexpr int kBlock = 1024;
 constexpr float kSilence = 1.0e-4f;
+
+// No-op log sink used to swallow FluidSynth's audio-driver probe warnings
+// during setup (we render offline and never open an audio driver).
+void silent_log(int /*level*/, const char* /*message*/, void* /*data*/) {}
 }  // namespace
 
 MidiSynth::MidiSynth(const std::string& soundfont_path, int sample_rate)
     : rate_(sample_rate) {
+  // Creating settings makes FluidSynth enumerate every compiled-in audio
+  // driver; the SDL2/SDL3 driver warns when SDL audio isn't initialized. We
+  // render offline and never open an audio driver, so mute warnings during
+  // setup, then restore the previous handler so real diagnostics (e.g. a
+  // SoundFont that fails to load) still reach the console.
+  fluid_log_function_t prev_warn =
+      fluid_set_log_function(FLUID_WARN, silent_log, nullptr);
   fluid_settings_t* settings = new_fluid_settings();
   settings_ = settings;
   fluid_settings_setnum(settings, "synth.sample-rate",
@@ -23,6 +34,7 @@ MidiSynth::MidiSynth(const std::string& soundfont_path, int sample_rate)
   fluid_settings_setint(settings, "synth.polyphony", 64);
   fluid_synth_t* synth = new_fluid_synth(settings);
   synth_ = synth;
+  fluid_set_log_function(FLUID_WARN, prev_warn, nullptr);
   if (synth) {
     sfid_ = fluid_synth_sfload(synth, soundfont_path.c_str(), 1);
   }
