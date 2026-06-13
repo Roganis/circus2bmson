@@ -130,8 +130,10 @@ shell:
 ```sh
 pacman -S --needed git mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake \
   mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-pkgconf \
-  mingw-w64-ucrt-x86_64-libopenmpt mingw-w64-ucrt-x86_64-libvorbis
-cmake -S . -B build -G Ninja && cmake --build build
+  mingw-w64-ucrt-x86_64-libopenmpt mingw-w64-ucrt-x86_64-libvorbis \
+  mingw-w64-ucrt-x86_64-fluidsynth mingw-w64-ucrt-x86_64-glfw \
+  mingw-w64-ucrt-x86_64-libgme
+cmake -S . -B build -G Ninja -DC2B_BUILD_GUI=ON && cmake --build build
 ```
 
 ### Convert

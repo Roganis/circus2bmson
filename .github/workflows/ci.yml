@@ -37,8 +37,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libopenmpt-dev libvorbis-dev libfluidsynth-dev \
-            timgm6mb-soundfont libglfw3-dev libgl1-mesa-dev patchelf file \
-            cmake ninja-build
+            timgm6mb-soundfont libglfw3-dev libgl1-mesa-dev libgme-dev patchelf \
+            file cmake ninja-build
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DC2B_BUILD_GUI=ON
@@ -100,6 +100,7 @@ jobs:
             mingw-w64-ucrt-x86_64-libvorbis
             mingw-w64-ucrt-x86_64-fluidsynth
             mingw-w64-ucrt-x86_64-glfw
+            mingw-w64-ucrt-x86_64-libgme
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DC2B_BUILD_GUI=ON
