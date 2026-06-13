@@ -60,6 +60,21 @@ target_compile_definitions(test_keysound_render PRIVATE
   C2B_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/test_out")
 add_test(NAME keysound_render COMMAND test_keysound_render)
 
+# MIDI: Standard MIDI File parser.
+add_executable(test_midi_parse test_midi_parse.cpp)
+target_link_libraries(test_midi_parse PRIVATE circus2bmson::circus2bmson)
+target_compile_definitions(test_midi_parse PRIVATE
+  C2B_FIXTURE_DIR="${C2B_FIXTURE_DIR}")
+add_test(NAME midi_parse COMMAND test_midi_parse)
+
+# MIDI end-to-end: parse + FluidSynth render -> bmson (skips without a SoundFont).
+add_executable(test_midi_convert test_midi_convert.cpp)
+target_link_libraries(test_midi_convert PRIVATE circus2bmson::circus2bmson)
+target_compile_definitions(test_midi_convert PRIVATE
+  C2B_FIXTURE_DIR="${C2B_FIXTURE_DIR}"
+  C2B_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/test_out")
+add_test(NAME midi_convert COMMAND test_midi_convert)
+
 # Oracle: generic libopenmpt-driven score == independent MOD sequencer.
 add_executable(test_score_vs_timeline test_score_vs_timeline.cpp)
 target_link_libraries(test_score_vs_timeline PRIVATE circus2bmson::circus2bmson)

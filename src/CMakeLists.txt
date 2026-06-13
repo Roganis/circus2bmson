@@ -10,6 +10,9 @@ add_library(circus2bmson
   mod.cpp
   timeline.cpp
   score.cpp
+  midi.cpp
+  midisynth.cpp
+  midiconv.cpp
   bmson.cpp
   render.cpp
   oggenc.cpp
@@ -23,7 +26,7 @@ target_include_directories(circus2bmson
 
 target_link_libraries(circus2bmson
   PUBLIC c2b_vendor
-  PRIVATE PkgConfig::LIBOPENMPT PkgConfig::VORBISENC)
+  PRIVATE PkgConfig::LIBOPENMPT PkgConfig::VORBISENC PkgConfig::FLUIDSYNTH)
 
 target_compile_definitions(circus2bmson
   PRIVATE C2B_VERSION="${PROJECT_VERSION}")

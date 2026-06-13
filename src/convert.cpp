@@ -1,6 +1,7 @@
 #include "circus2bmson/convert.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -12,6 +13,7 @@
 #include "circus2bmson/bmson.hpp"
 #include "circus2bmson/render.hpp"
 #include "circus2bmson/score.hpp"
+#include "midiconv.hpp"
 
 namespace circus2bmson {
 namespace {
@@ -28,6 +30,14 @@ std::vector<std::uint8_t> read_file_bytes(const std::string& path) {
 ConvertResult convert_mod_file(const std::string& input_path,
                                const ConvertOptions& opts) {
   const std::vector<std::uint8_t> bytes = read_file_bytes(input_path);
+
+  // MIDI is a separate family (no embedded audio -> needs a SoundFont synth);
+  // dispatch by extension since libopenmpt can't sniff it.
+  std::string ext = std::filesystem::path(input_path).extension().string();
+  for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  if (ext == ".mid" || ext == ".midi")
+    return convert_midi(bytes, input_path, opts);
+
   const Score score = read_score(bytes, opts.max_loops);
 
   namespace fs = std::filesystem;

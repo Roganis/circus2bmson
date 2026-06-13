@@ -14,8 +14,9 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libopenmpt-dev libvorbis-dev libglfw3-dev \
-            libgl1-mesa-dev patchelf file cmake ninja-build
+          sudo apt-get install -y libopenmpt-dev libvorbis-dev libfluidsynth-dev \
+            timgm6mb-soundfont libglfw3-dev libgl1-mesa-dev patchelf file \
+            cmake ninja-build
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DC2B_BUILD_GUI=ON
@@ -66,6 +67,7 @@ jobs:
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-libopenmpt
             mingw-w64-ucrt-x86_64-libvorbis
+            mingw-w64-ucrt-x86_64-fluidsynth
             mingw-w64-ucrt-x86_64-glfw
 
       - name: Configure

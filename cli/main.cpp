@@ -21,6 +21,7 @@ void print_usage(const char* argv0) {
       << "options:\n"
       << "  -o, --output DIR    output folder (default: a folder named after the input)\n"
       << "  --format FMT        keysound files: wav (default) | ogg\n"
+      << "  --soundfont FILE    SoundFont (.sf2) for MIDI input\n"
       << "  --max-loops N       times to unroll a looping section (default 1)\n"
       << "  --name-by WHICH     keysound names: channel (default) | instrument | lane\n"
       << "  --volume-ramping    keep libopenmpt's anti-click ramp (more keysounds)\n"
@@ -87,6 +88,12 @@ int main(int argc, char** argv) {
         std::cerr << "error: --name-by expects 'channel', 'instrument' or 'lane'\n";
         return 2;
       }
+    } else if (a == "--soundfont") {
+      if (++i >= argc) {
+        std::cerr << "error: missing argument for " << a << "\n";
+        return 2;
+      }
+      opts.soundfont_path = argv[i];
     } else if (a == "--volume-ramping") {
       opts.volume_ramping = true;
     } else if (a == "--no-audio") {

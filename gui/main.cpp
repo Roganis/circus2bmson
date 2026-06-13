@@ -106,9 +106,9 @@ void start_convert(AppState& s) {
 void pick_input(AppState& s) {
   auto sel = pfd::open_file(
                  "Select a module", ".",
-                 {"Tracker modules",
+                 {"Modules & MIDI",
                   "*.mod *.xm *.s3m *.it *.mptm *.mtm *.669 *.med *.okt *.dbm "
-                  "*.ptm *.stm *.ult *.far",
+                  "*.ptm *.stm *.ult *.far *.mid *.midi",
                   "All files", "*"})
                  .result();
   if (!sel.empty()) copy_to(s.input, sizeof(s.input), sel[0]);
@@ -197,7 +197,7 @@ void draw_ui(AppState& s) {
   ImGui::Dummy(ImVec2(0, 4));
   ImGui::TextUnformatted("SoundFont (.sf2):");
   ImGui::SameLine();
-  ImGui::TextDisabled("(used for MIDI input - not yet supported)");
+  ImGui::TextDisabled("(for MIDI input)");
   if (path_row("##sf", "(bundled default)", s.soundfont, sizeof(s.soundfont)))
     pick_soundfont(s);
 

@@ -2,7 +2,8 @@
 
 Convert vintage tracker music into [bmson](https://bmson-spec.readthedocs.io/),
 the JSON chart format for BMS. Accepts **any format libopenmpt plays** — MOD
-(ProTracker & variants), XM, S3M, IT, and dozens more.
+(ProTracker & variants), XM, S3M, IT, and dozens more — plus **General MIDI**
+(`.mid`/`.midi`), rendered through a SoundFont with FluidSynth.
 
 The output is a standard bmson folder with every note placed on the **BGM lane
 (`x: 0`)** so the result plays back like the original module and can then be
@@ -112,9 +113,15 @@ cmake -S . -B build -G Ninja && cmake --build build
 ### Convert
 
 ```sh
-./build/cli/circus2bmson song.it -o out      # any libopenmpt format
-./build/cli/circus2bmson song.mod            # -> song/song.bmson beside the file
+./build/cli/circus2bmson song.it -o out                  # any libopenmpt format
+./build/cli/circus2bmson song.mod                        # -> song/song.bmson beside the file
+./build/cli/circus2bmson song.mid --soundfont GM.sf2     # MIDI (needs a SoundFont)
 ```
+
+MIDI files carry no audio of their own, so the timbres come from a **SoundFont**
+(`.sf2`): pass `--soundfont` (or the GUI picker), set `C2B_SOUNDFONT`, or install
+one system-wide (e.g. `/usr/share/sounds/sf2/`). Each note is rendered in
+isolation through FluidSynth and deduplicated like any other keysound.
 
 With no `-o`, output goes to a folder named after the module, beside it — so on
 Windows you can just **drag a module onto `circus2bmson.exe`** and get a
