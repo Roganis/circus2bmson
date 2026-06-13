@@ -51,6 +51,23 @@ std::string pad(int v, int w) {
   return b;
 }
 
+bool valid_utf8(const std::string& s) {
+  std::size_t i = 0, n = s.size();
+  while (i < n) {
+    const unsigned char c = static_cast<unsigned char>(s[i]);
+    std::size_t len = c < 0x80          ? 1
+                      : (c >> 5) == 0x6 ? 2
+                      : (c >> 4) == 0xE ? 3
+                      : (c >> 3) == 0x1E ? 4
+                                         : 0;
+    if (len == 0 || i + len > n) return false;
+    for (std::size_t j = 1; j < len; ++j)
+      if ((static_cast<unsigned char>(s[i + j]) & 0xC0) != 0x80) return false;
+    i += len;
+  }
+  return true;
+}
+
 std::string note_name(int key) {
   static const char* n[12] = {"C",  "C#", "D",  "D#", "E",  "F",
                               "F#", "G",  "G#", "A",  "A#", "B"};
@@ -188,7 +205,9 @@ ConvertResult convert_midi(const std::vector<std::uint8_t>& bytes,
 
   // --- bmson timeline (1 pulse == 1 MIDI tick). ---
   Score sc;
-  sc.title = !song.title.empty() ? song.title : stem;
+  // Some MIDIs store the title in Shift-JIS/Latin-1; fall back to the filename
+  // rather than emit non-UTF-8 text.
+  sc.title = (!song.title.empty() && valid_utf8(song.title)) ? song.title : stem;
   sc.format = "midi";
   sc.resolution = song.division;
   sc.init_bpm = 60000000.0 / song.tempos[0].usec_per_qn;

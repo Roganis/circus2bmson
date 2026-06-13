@@ -60,6 +60,11 @@ target_compile_definitions(test_keysound_render PRIVATE
   C2B_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/test_out")
 add_test(NAME keysound_render COMMAND test_keysound_render)
 
+# bmson emission must tolerate non-UTF-8 text (e.g. Shift-JIS MIDI titles).
+add_executable(test_bmson_utf8 test_bmson_utf8.cpp)
+target_link_libraries(test_bmson_utf8 PRIVATE circus2bmson::circus2bmson)
+add_test(NAME bmson_utf8 COMMAND test_bmson_utf8)
+
 # MIDI: Standard MIDI File parser.
 add_executable(test_midi_parse test_midi_parse.cpp)
 target_link_libraries(test_midi_parse PRIVATE circus2bmson::circus2bmson)

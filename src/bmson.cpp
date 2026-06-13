@@ -69,7 +69,9 @@ std::string build_bmson(const Score& score,
   }
   doc["sound_channels"] = std::move(sound);
 
-  return doc.dump(2);
+  // Replace (don't throw on) invalid UTF-8 -- module/MIDI text can be in legacy
+  // encodings like Shift-JIS or Latin-1.
+  return doc.dump(2, ' ', false, json::error_handler_t::replace);
 }
 
 std::string build_bmson_skeleton(const Score& score, const std::string& ext) {
