@@ -12,12 +12,14 @@ namespace {
 void print_usage(const char* argv0) {
   std::cout
       << "circus2bmson " << circus2bmson::version() << "\n"
-      << "Convert tracker modules to the bmson format.\n"
-      << "Accepts any format libopenmpt plays: MOD, XM, S3M, IT, and more.\n\n"
+      << "Convert tracker modules (and MIDI) to the bmson format.\n"
+      << "Accepts any format libopenmpt plays (MOD, XM, S3M, IT, ...) plus MIDI;\n"
+      << "see --list-formats.\n\n"
       << "usage:\n"
       << "  " << argv0 << " <module> [-o <output_dir>] [options]\n"
       << "  " << argv0 << " --version\n"
-      << "  " << argv0 << " --help\n\n"
+      << "  " << argv0 << " --help\n"
+      << "  " << argv0 << " --list-formats\n\n"
       << "options:\n"
       << "  -o, --output DIR    output folder (default: a folder named after the input)\n"
       << "  --format FMT        keysound files: wav (default) | ogg\n"
@@ -25,7 +27,8 @@ void print_usage(const char* argv0) {
       << "  --max-loops N       times to unroll a looping section (default 1)\n"
       << "  --name-by WHICH     keysound names: channel (default) | instrument | lane\n"
       << "  --volume-ramping    keep libopenmpt's anti-click ramp (more keysounds)\n"
-      << "  --no-audio          emit bmson skeleton only (no keysound files)\n";
+      << "  --no-audio          emit bmson skeleton only (no keysound files)\n"
+      << "  --list-formats      list the input extensions this build accepts\n";
 }
 
 }  // namespace
@@ -43,6 +46,12 @@ int main(int argc, char** argv) {
     }
     if (a == "--help" || a == "-h") {
       print_usage(argv[0]);
+      return 0;
+    }
+    if (a == "--list-formats") {
+      const auto exts = circus2bmson::supported_input_extensions();
+      for (std::size_t k = 0; k < exts.size(); ++k)
+        std::cout << exts[k] << (k + 1 < exts.size() ? " " : "\n");
       return 0;
     }
     if (a == "-o" || a == "--output") {

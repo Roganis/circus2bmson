@@ -128,6 +128,7 @@ cmake -S . -B build -G Ninja && cmake --build build
 ./build/cli/circus2bmson song.it -o out                  # any libopenmpt format
 ./build/cli/circus2bmson song.mod                        # -> song/song.bmson beside the file
 ./build/cli/circus2bmson song.mid --soundfont GM.sf2     # MIDI (needs a SoundFont)
+./build/cli/circus2bmson --list-formats                  # every input extension this build accepts
 ```
 
 MIDI files carry no audio of their own, so the timbres come from a **SoundFont**

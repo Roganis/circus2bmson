@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
 
 #include "circus2bmson/midimix.hpp"
 #include "circus2bmson/render.hpp"
@@ -56,6 +57,12 @@ ConvertResult convert_mod_file(const std::string& input_path,
 // (must exist), else $C2B_SOUNDFONT, the bundled FluidR3_GM.sf2, or a common
 // system location. Throws std::runtime_error if none is found.
 std::string resolve_soundfont(const std::string& given);
+
+// Input file extensions this build accepts (lower-case, no leading dot, sorted):
+// every tracker format the linked libopenmpt supports, plus "mid"/"midi" for
+// the MIDI backend. Sourced from libopenmpt so it never drifts from reality;
+// handy for file-dialog filters and CLI help.
+std::vector<std::string> supported_input_extensions();
 
 }  // namespace circus2bmson
 

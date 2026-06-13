@@ -188,12 +188,14 @@ void start_convert(AppState& s) {
 }
 
 void pick_input(AppState& s) {
-  auto sel = pfd::open_file(
-                 "Select a module", ".",
-                 {"Modules & MIDI",
-                  "*.mod *.xm *.s3m *.it *.mptm *.mtm *.669 *.med *.okt *.dbm "
-                  "*.ptm *.stm *.ult *.far *.mid *.midi",
-                  "All files", "*"})
+  // Advertise exactly what this build can read (libopenmpt formats + MIDI).
+  std::string patterns;
+  for (const std::string& e : circus2bmson::supported_input_extensions()) {
+    if (!patterns.empty()) patterns += ' ';
+    patterns += "*." + e;
+  }
+  auto sel = pfd::open_file("Select a module or MIDI", ".",
+                            {"Modules & MIDI", patterns, "All files", "*"})
                  .result();
   if (!sel.empty()) copy_to(s.input, sizeof(s.input), sel[0]);
 }

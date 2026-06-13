@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 
+#include <libopenmpt/libopenmpt.hpp>
+
 #include "circus2bmson/bmson.hpp"
 #include "circus2bmson/render.hpp"
 #include "circus2bmson/score.hpp"
@@ -98,6 +100,15 @@ ConvertResult convert_mod_file(const std::string& input_path,
 
   r.bmson_path = out_path.string();
   return r;
+}
+
+std::vector<std::string> supported_input_extensions() {
+  std::vector<std::string> exts = openmpt::get_supported_extensions();
+  exts.emplace_back("mid");
+  exts.emplace_back("midi");
+  std::sort(exts.begin(), exts.end());
+  exts.erase(std::unique(exts.begin(), exts.end()), exts.end());
+  return exts;
 }
 
 }  // namespace circus2bmson
