@@ -85,10 +85,12 @@ add_executable(test_onset test_onset.cpp)
 target_link_libraries(test_onset PRIVATE circus2bmson::circus2bmson)
 add_test(NAME onset COMMAND test_onset)
 
-# game-music-emu chip backend: load a VGM, render per-voice, detect onsets.
-# Self-skips when the build has no libgme.
+# game-music-emu chip backend: load a VGM, render per-voice, detect onsets, and
+# convert to bmson. Self-skips when the build has no libgme.
 add_executable(test_chip test_chip.cpp)
 target_link_libraries(test_chip PRIVATE circus2bmson::circus2bmson)
+target_compile_definitions(test_chip PRIVATE
+  C2B_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/test_out")
 add_test(NAME chip COMMAND test_chip)
 
 # Input format advertising: libopenmpt extensions + MIDI, sorted/unique.

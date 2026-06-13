@@ -13,8 +13,10 @@
 #include <libopenmpt/libopenmpt.hpp>
 
 #include "circus2bmson/bmson.hpp"
+#include "circus2bmson/chip.hpp"
 #include "circus2bmson/render.hpp"
 #include "circus2bmson/score.hpp"
+#include "chipconv.hpp"
 #include "midiconv.hpp"
 
 namespace circus2bmson {
@@ -39,6 +41,11 @@ ConvertResult convert_mod_file(const std::string& input_path,
   for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   if (ext == ".mid" || ext == ".midi")
     return convert_midi(bytes, input_path, opts);
+
+  // Chip-music formats (NSF/GBS/VGM/...) need the libgme backend; libopenmpt
+  // can't read them. Only dispatched here when libgme was built in.
+  if (chip_handles_extension(ext))
+    return convert_chip(bytes, input_path, opts);
 
   const Score score = read_score(bytes, opts.max_loops);
 
@@ -106,6 +113,7 @@ std::vector<std::string> supported_input_extensions() {
   std::vector<std::string> exts = openmpt::get_supported_extensions();
   exts.emplace_back("mid");
   exts.emplace_back("midi");
+  for (const std::string& e : chip_extensions()) exts.push_back(e);  // {} w/o libgme
   std::sort(exts.begin(), exts.end());
   exts.erase(std::unique(exts.begin(), exts.end()), exts.end());
   return exts;

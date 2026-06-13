@@ -30,6 +30,10 @@ struct ChipScan {
 // True when this build was compiled with libgme support.
 bool chip_supported();
 
+// Lower-case file extensions the chip backend handles (libgme's known types,
+// e.g. "nsf", "gbs", "vgm"); empty when built without libgme.
+std::vector<std::string> chip_extensions();
+
 // Load `bytes` (track 0), render per-voice stems, and detect onsets per voice.
 // Throws std::runtime_error if libgme is unavailable or the data is unreadable.
 ChipScan scan_chip(const std::vector<std::uint8_t>& bytes,

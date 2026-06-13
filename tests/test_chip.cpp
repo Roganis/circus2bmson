@@ -1,14 +1,19 @@
-// game-music-emu spike: a hand-built VGM (SN76489, three square bursts on the
-// first channel) loads via libgme, reports its voices, and scan_chip recovers
-// the three note onsets by audio-domain detection. Skips when built without
-// libgme.
+// game-music-emu backend: a hand-built VGM (SN76489, three square bursts on the
+// first channel) loads via libgme, scan_chip recovers the three onsets, and the
+// full converter dispatches it to a valid bmson with keysound files. Skips when
+// built without libgme.
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include "check.hpp"
 #include "circus2bmson/chip.hpp"
+#include "circus2bmson/convert.hpp"
 
 namespace {
 using std::uint32_t;
@@ -60,16 +65,50 @@ int main() {
     return 0;
   }
 
-  const ChipScan s = scan_chip(make_vgm());
+  const std::vector<uint8_t> vgm = make_vgm();
+
+  // scan_chip: voices + onsets.
+  const ChipScan s = scan_chip(vgm);
   std::printf("  type=%s system=%s voices=%zu frames=%ld\n", s.type.c_str(),
               s.system.c_str(), s.voices.size(), s.total_frames);
-  CHECK_MSG(!s.type.empty(), "type='%s'", s.type.c_str());
+  CHECK_MSG(s.type == "vgm", "type='%s'", s.type.c_str());
   CHECK(s.voices.size() >= 1);
   CHECK(s.total_frames > 0);
-
   long onsets = 0;
   for (const ChipVoice& v : s.voices) onsets += static_cast<long>(v.onset_frames.size());
   CHECK_MSG(onsets == 3, "total onsets=%ld want 3", onsets);
+
+  // Full conversion via the public entry point (dispatch by .vgm extension).
+  const std::string out = std::string(C2B_TMP_DIR) + "/chip";
+  std::filesystem::create_directories(out);
+  const std::string vgm_path = out + "/synth.vgm";
+  { std::ofstream f(vgm_path, std::ios::binary);
+    f.write(reinterpret_cast<const char*>(vgm.data()), static_cast<std::streamsize>(vgm.size())); }
+
+  ConvertOptions opts;
+  opts.output_dir = out;
+  const ConvertResult r = convert_mod_file(vgm_path, opts);
+  CHECK(r.audio_rendered);
+  CHECK_MSG(r.note_count == 3, "note_count=%zu", r.note_count);
+  CHECK(r.keysound_count >= 1);
+  CHECK(r.init_bpm > 0.0);
+
+  nlohmann::json doc;
+  std::ifstream(r.bmson_path) >> doc;
+  CHECK(doc.at("info").at("resolution") == 480);
+  CHECK(doc.at("info").at("init_bpm").get<double>() > 0.0);
+  std::size_t notes = 0, files_ok = 0;
+  for (const auto& ch : doc.at("sound_channels")) {
+    const auto p = std::filesystem::path(out) / ch.at("name").get<std::string>();
+    if (std::filesystem::exists(p) && std::filesystem::file_size(p) > 44) ++files_ok;
+    for (const auto& n : ch.at("notes")) {
+      CHECK(n.at("x").get<int>() == 0);  // BGM lane
+      ++notes;
+    }
+  }
+  CHECK_MSG(notes == 3, "json notes=%zu want 3", notes);
+  CHECK_MSG(files_ok == doc.at("sound_channels").size(), "files=%zu/%zu", files_ok,
+            doc.at("sound_channels").size());
 
   REPORT_AND_RETURN();
 }
