@@ -205,18 +205,32 @@ double cosine(const std::vector<float>& a, const std::vector<float>& b) {
   return d;
 }
 
-// Fade both edges to zero, so a keysound always starts and ends at silence and
+// Fade a keysound's edges to zero, so it always starts and ends at silence and
 // the joins between consecutive ones cannot step -- which is what makes
 // substituting a phase-shifted near-match safe.
-void fade_edges(std::vector<std::int16_t>& pcm, int rate, double fade_ms) {
-  if (fade_ms <= 0.0 || pcm.empty()) return;
+//
+// The two edges do different jobs and want different lengths. The fade-*out* is
+// what actually keeps a seam quiet, and can be long. The fade-*in* only has to
+// get the first sample to zero, and every millisecond of it is a millisecond of
+// a percussive attack being blunted -- so it wants to be as short as it can be
+// while still ramping rather than stepping.
+void fade_edges(std::vector<std::int16_t>& pcm, int rate, double in_ms,
+                double out_ms) {
+  if (pcm.empty()) return;
   const long frames = static_cast<long>(pcm.size() / 2);
-  long f = static_cast<long>(fade_ms * rate / 1000.0);
-  f = std::min(f, frames / 2);
-  for (long i = 0; i < f; ++i) {
-    const float g = static_cast<float>(i) / static_cast<float>(f);
+  auto ramp = [&](double ms) {
+    long f = static_cast<long>(ms * rate / 1000.0);
+    return std::max<long>(0, std::min(f, frames / 2));
+  };
+  const long fin = ramp(in_ms), fout = ramp(out_ms);
+
+  for (long i = 0; i < fin; ++i) {
+    const float g = static_cast<float>(i) / static_cast<float>(fin);
     pcm[2 * i] = static_cast<std::int16_t>(std::lrintf(pcm[2 * i] * g));
     pcm[2 * i + 1] = static_cast<std::int16_t>(std::lrintf(pcm[2 * i + 1] * g));
+  }
+  for (long i = 0; i < fout; ++i) {
+    const float g = static_cast<float>(i) / static_cast<float>(fout);
     const long j = frames - 1 - i;
     pcm[2 * j] = static_cast<std::int16_t>(std::lrintf(pcm[2 * j] * g));
     pcm[2 * j + 1] = static_cast<std::int16_t>(std::lrintf(pcm[2 * j + 1] * g));
@@ -423,6 +437,10 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
   const double fade_ms = opts.keysound_fade_ms >= 0.0 ? opts.keysound_fade_ms
                          : ignore_phase             ? 2.0
                                                     : 0.0;
+  const double attack_ms = opts.keysound_attack_ms >= 0.0
+                               ? opts.keysound_attack_ms
+                           : ignore_phase ? 0.3
+                                          : 0.0;
   // (voice, length, note id) -- the note id is -1 unless we know it, and in
   // ignore-phase mode a merge can only ever happen inside one of these buckets.
   std::map<std::tuple<std::size_t, long, int>, std::vector<Rep>> reps;
@@ -526,7 +544,7 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
           for (int x = 2; used_names.count(name); ++x)
             name = base + "_" + std::to_string(x) + ext;
           used_names.insert(name);
-          fade_edges(pcm, rate, fade_ms);
+          fade_edges(pcm, rate, attack_ms, fade_ms);
           pool.submit((out_dir / name).string(), std::move(pcm));
           SoundChannel sc;
           sc.name = name;

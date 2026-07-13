@@ -34,8 +34,12 @@ void print_usage(const char* argv0) {
       << "                      differently each hit). Far fewer keysounds;\n"
       << "                      fades each one's edges to hide the joins.\n"
       << "                      EXPERIMENTAL -- judge it by ear.\n"
-      << "  --keysound-fade MS  fade keysound edges (default 0, or 2 with\n"
-      << "                      --dedup-ignore-phase)\n"
+      << "  --keysound-fade MS  fade-out at each keysound's end (default 0, or\n"
+      << "                      2 with --dedup-ignore-phase)\n"
+      << "  --keysound-attack MS\n"
+      << "                      fade-in at each keysound's start (default 0, or\n"
+      << "                      0.3 with --dedup-ignore-phase). Lower is a\n"
+      << "                      sharper attack; 0 is sharpest and may pop.\n"
       << "  --max-loops N       times to unroll a looping section (default 1)\n"
       << "  --name-by WHICH     keysound names: channel (default) | instrument | lane\n"
       << "  --volume-ramping    keep libopenmpt's anti-click ramp (more keysounds)\n"
@@ -140,6 +144,12 @@ int main(int argc, char** argv) {
         return 2;
       }
       opts.keysound_fade_ms = std::atof(argv[i]);
+    } else if (a == "--keysound-attack") {
+      if (++i >= argc) {
+        std::cerr << "error: missing argument for " << a << "\n";
+        return 2;
+      }
+      opts.keysound_attack_ms = std::atof(argv[i]);
     } else if (a == "--volume-ramping") {
       opts.volume_ramping = true;
     } else if (a == "--no-audio") {

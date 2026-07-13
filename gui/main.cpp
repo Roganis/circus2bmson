@@ -39,7 +39,8 @@ struct AppState {
   bool render_audio = true;
   int audio_format = 0;       // 0 = WAV, 1 = OGG
   int naming = 0;             // 0 = Channel, 1 = Instrument, 2 = Lane
-  int dedup = 0;              // 0 = exact, 1 = -40 dB, 2 = -30 dB
+  int dedup = 0;              // 0 = exact, 1 = -40 dB, 2 = -30 dB, 3 = ignore phase
+  float attack_ms = 0.3f;     // keysound fade-in; only used when dedup == 3
   int max_loops = 1;
   bool volume_ramping = false;
   bool honor_cc = true;       // apply the MIDI's own CC7/CC11 volume
@@ -176,6 +177,7 @@ void start_convert(AppState& s) {
   opts.max_loops = s.max_loops < 1 ? 1 : s.max_loops;
   opts.dedup_tolerance_db = s.dedup == 1 ? 40.0 : s.dedup == 2 ? 30.0 : 0.0;
   opts.dedup_ignore_phase = s.dedup == 3;
+  if (s.dedup == 3) opts.keysound_attack_ms = s.attack_ms;
   opts.volume_ramping = s.volume_ramping;
   opts.soundfont_path = s.soundfont;  // used for MIDI input
   // Bake the live mixer settings into the keysounds; otherwise just honour the
@@ -294,6 +296,14 @@ void draw_ui(AppState& s) {
         "Ignore phase: matches on timbre alone, so the many renderings of one\n"
         "drum collapse into one sound -- roughly a third as many keysounds.\n"
         "Keysound edges are faded so the joins stay silent. Judge it by ear.");
+
+  if (s.dedup == 3) {
+    ImGui::SliderFloat("Attack (ms)", &s.attack_ms, 0.0f, 2.0f, "%.2f");
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip(
+          "Fade-in on each keysound. Shorter keeps percussive attacks sharp;\n"
+          "0 is sharpest and can pop where a keysound starts mid-waveform.");
+  }
   ImGui::Checkbox("Volume ramping (libopenmpt smoothing; more keysounds)",
                   &s.volume_ramping);
   ImGui::EndDisabled();

@@ -61,10 +61,21 @@ struct ConvertOptions {
   // not hear. Off by default.
   bool dedup_ignore_phase = false;
 
-  // Fade applied to each keysound's edges, in milliseconds. Defaults to 0 (none)
-  // and to 2 ms when dedup_ignore_phase is on, where it is what keeps the seams
-  // silent. Set explicitly to override either way.
-  double keysound_fade_ms = -1.0;  // <0 -> pick the default for the mode
+  // Fade-out at the end of each keysound, in milliseconds. This is the edge that
+  // keeps a seam quiet. Defaults to 0 (none), or 2 ms when dedup_ignore_phase is
+  // on. <0 -> pick the default for the mode.
+  double keysound_fade_ms = -1.0;
+
+  // Fade-in at the start of each keysound, in milliseconds. Kept separate from
+  // the fade-out and much shorter, because every millisecond of it blunts a
+  // percussive attack: it only has to reach zero at the first sample, not
+  // disguise anything. Defaults to 0.3 ms with dedup_ignore_phase, which is
+  // ~13 samples -- enough to ramp instead of step.
+  //
+  // 0 means no fade-in at all: the sharpest possible attack, at the price of an
+  // occasional pop where a substituted keysound starts on a non-zero sample.
+  // <0 -> pick the default for the mode.
+  double keysound_attack_ms = -1.0;
   // Optional: called as the conversion moves through its slow stages, so a UI
   // can say what it is doing -- a long chip conversion spends minutes rendering
   // and encoding, and a silent "converting..." is indistinguishable from a
