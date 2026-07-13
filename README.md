@@ -37,28 +37,36 @@ slides keep the grid exactly aligned with the rendered audio.
 
 Backends fall into two groups, and it is worth knowing which one your file is in.
 
-**Exact tier — libopenmpt (MOD/XM/S3M/IT/…) and MIDI.** The score is read from
-the file's own note events, so keysounds are sliced at the exact onsets and the
-pulse grid is the module's real tempo. Reconstruction is gated in CI at ~-80 dB.
+**Exact tier — libopenmpt (MOD/XM/S3M/IT/…), MIDI, and the chiptune trackers
+(`.dmf`/`.fur`).** Notes come from the file's own note events, so keysounds are
+sliced at the exact onsets and the pulse grid is the module's real tempo.
+Reconstruction of the libopenmpt path is gated in CI at ~-80 dB.
 
-**Inferred tier — chip files (NSF/GBS/VGM/… via libgme) and chiptune trackers
-(`.dmf`/`.fur` via Furnace).** Each voice is rendered in isolation and the notes
-are *recovered from the audio* by onset detection, because the register-dump
-formats carry no note events (and, for now, because we do not parse `.dmf`
-pattern data yet). Two consequences, both inherent rather than bugs:
+For `.dmf`/`.fur` those note events come out of **Furnace's `-view commands`
+stream**, which timestamps every `NOTE_ON` in engine ticks — no pattern parsing,
+and it covers both formats. The tick rate and the real BPM (row duration × the
+composer's own rows-per-beat highlight) are read from the module header, so
+notes land on exact rows: on a Genesis test module, 100 % of 5 558 notes fall on
+an integer row of a 150.00 BPM grid.
 
-- **Legato is invisible.** A square wave gliding from pitch to pitch with no
-  amplitude dip has no onset to detect, so those notes are missed. Chip music
-  does this constantly.
-- **Keysounds do not sum back to the original mix.** These chips mix their
-  channels *non-linearly* in hardware and the emulators model that faithfully,
-  but a BMS player sums keysounds linearly. Measured residual of
-  sum-of-stems vs. the real mix: Amiga -55 dB (linear mixer), PC Engine -33 dB,
-  Game Boy -13 dB, NES -11 dB, Genesis/YM2612 -7 dB. So a Genesis chart is a
-  faithful *re-performance*, not a bit-exact reproduction.
+This matters more than it sounds. Recovering these notes from *audio* misses
+every note that is only a pitch change — a square wave gliding from pitch to
+pitch never dips in amplitude, so there is no onset to detect — and chip music
+does that constantly. On that same module, onset detection found 1 473 of the
+5 558 notes and turned each melodic phrase into one long keysound.
 
-Parsing `.dmf` natively will lift it into the exact tier for the note/timing
-half; the mixing caveat is a property of the hardware and stays.
+**Inferred tier — chip files (NSF/GBS/VGM/… via libgme).** Register-dump formats
+carry no note events at all, so their notes still have to be recovered from the
+audio (`onset.hpp`), with exactly the legato blindness described above, and the
+BPM is guessed. This is the tier to be suspicious of.
+
+**Both chip tiers: keysounds do not sum back to the original mix.** These chips
+mix their channels *non-linearly* in hardware and the emulators model that
+faithfully, but a BMS player sums keysounds linearly. Measured residual of
+sum-of-stems vs. the real mix: Amiga -55 dB (linear mixer), PC Engine -33 dB,
+Game Boy -13 dB, NES -11 dB, Genesis/YM2612 -7 dB. So a Genesis chart is a
+faithful *re-performance*, not a bit-exact reproduction. That is a property of
+the hardware, and it stays.
 
 ## Status — roadmap
 
@@ -83,12 +91,11 @@ half; the mixing caveat is a property of the hardware and stays.
 - [x] **Chip formats (game-music-emu)** — libgme renders each chip voice in
       isolation, onsets are recovered from the audio (audio-domain detection),
       and the shared stem path turns them into keysounds on a pulse grid.
-- [ ] **Chiptune trackers (`.dmf` / `.fur`)** — step 1 in place: the Furnace
-      binary renders each chip channel (`-outmode perchan`) and the same
-      audio-domain path takes over, so these currently sit in the inferred tier
-      (see below). Next: parse `.dmf` natively for an *exact* score — notes and
-      row timing come straight from the pattern data, no detection, no guessed
-      BPM. See `include/circus2bmson/furnace.hpp`.
+- [x] **Chiptune trackers (`.dmf` / `.fur`)** — the Furnace binary renders each
+      chip channel (`-outmode perchan`) *and* dumps its note events
+      (`-view commands`), so these are exact-tier: real notes on the module's
+      real BPM grid. A native `.dmf` parser turned out to be unnecessary — the
+      renderer already knows. See `include/circus2bmson/furnace.hpp`.
 - [ ] **M4** — remaining refinements: macOS CI. (Windows CI + prebuilt `.exe`
       artifact: done.)
 

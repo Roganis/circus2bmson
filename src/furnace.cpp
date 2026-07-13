@@ -4,15 +4,20 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #ifndef _WIN32
@@ -20,6 +25,7 @@
 #endif
 
 #include <dr_libs/dr_wav.h>
+#include <zlib.h>
 
 #include "furnaceconv.hpp"
 #include "stemconv.hpp"
@@ -51,6 +57,154 @@ std::string quote(const std::string& s) {
         "path contains a quote or newline, which cannot be passed safely to "
         "furnace: " + s);
   return "\"" + s + "\"";
+}
+
+// Both formats are (usually) whole-file zlib streams. Returns the input
+// unchanged when it is not one -- .fur is sometimes stored uncompressed.
+std::vector<std::uint8_t> inflate_all(const std::vector<std::uint8_t>& in) {
+  if (in.size() < 2 || in[0] != 0x78) return in;  // not a zlib stream
+
+  z_stream zs{};
+  if (inflateInit(&zs) != Z_OK) return in;
+  zs.next_in = const_cast<Bytef*>(in.data());
+  zs.avail_in = static_cast<uInt>(in.size());
+
+  std::vector<std::uint8_t> out;
+  std::vector<std::uint8_t> chunk(64 * 1024);
+  int rc = Z_OK;
+  do {
+    zs.next_out = chunk.data();
+    zs.avail_out = static_cast<uInt>(chunk.size());
+    rc = inflate(&zs, Z_NO_FLUSH);
+    if (rc != Z_OK && rc != Z_STREAM_END) break;
+    out.insert(out.end(), chunk.data(), chunk.data() + (chunk.size() - zs.avail_out));
+  } while (rc != Z_STREAM_END);
+  inflateEnd(&zs);
+  return out.empty() ? in : out;
+}
+
+// What we need out of the module itself. Both formats state all of it in their
+// header, which is far less work than parsing their pattern data:
+//
+//   hz  -- ticks per second: the rate Furnace runs the song at, and so the unit
+//          its command stream timestamps notes in. Turns ticks into frames.
+//   bpm -- the real musical tempo, from the row duration and the composer's own
+//          "rows per beat" highlight. Beats guessing it from note spacing: the
+//          notes are already exactly placed, and this makes the bmson's grid
+//          line up with the bars the module was written on.
+struct Timing {
+  double hz = 0.0;   // 0 -> unknown; fall back to audio-domain onsets
+  double bpm = 0.0;  // 0 -> unknown; fall back to inferring it from the onsets
+};
+
+// rows/beat is the editor highlight the composer set. Row duration is
+// (timeBase + 1) * speed ticks; speed alternates between two values per row, so
+// the average is what a tempo means here.
+double bpm_from(double hz, int time_base, int speed1, int speed2, int rows_per_beat) {
+  if (hz <= 0.0 || rows_per_beat <= 0 || speed1 <= 0 || speed2 <= 0) return 0.0;
+  const double ticks_per_row = (time_base + 1) * (speed1 + speed2) / 2.0;
+  if (ticks_per_row <= 0.0) return 0.0;
+  const double bpm = 60.0 * hz / (ticks_per_row * rows_per_beat);
+  return (bpm > 20.0 && bpm < 999.0) ? bpm : 0.0;
+}
+
+Timing module_timing(const std::vector<std::uint8_t>& raw, const std::string& fmt) {
+  const std::vector<std::uint8_t> b = inflate_all(raw);
+  Timing t;
+
+  if (fmt == "fur") {
+    // INFO block: "INFO", size, timeBase, speed1, speed2, arpTime, hz (float),
+    // pattern length, orders length, highlight A, highlight B.
+    for (std::size_t i = 0; i + 22 <= b.size(); ++i) {
+      if (b[i] == 'I' && b[i + 1] == 'N' && b[i + 2] == 'F' && b[i + 3] == 'O') {
+        float hz = 0.0f;
+        std::memcpy(&hz, &b[i + 12], 4);
+        if (hz <= 1.0f || hz >= 1000.0f) return t;
+        t.hz = hz;
+        t.bpm = bpm_from(t.hz, b[i + 8], b[i + 9], b[i + 10], b[i + 20]);
+        return t;
+      }
+    }
+    return t;
+  }
+
+  // .dmf header.
+  const char* magic = ".DelekDefleMask.";
+  if (b.size() < 32 || std::memcmp(b.data(), magic, 16) != 0) return t;
+  std::size_t p = 16;
+  p += 1;  // format version
+  p += 1;  // system
+  if (p >= b.size()) return t;
+  p += 1 + b[p];  // song name (length-prefixed)
+  if (p >= b.size()) return t;
+  p += 1 + b[p];  // song author
+  if (p + 8 > b.size()) return t;
+  const int highlight_a = b[p];  // rows per beat
+  p += 2;                        // highlight A / B
+  const int time_base = b[p];
+  const int speed1 = b[p + 1];
+  const int speed2 = b[p + 2];
+  p += 3;
+  if (p + 5 > b.size()) return t;
+  const int frames_mode = b[p];  // 0 = PAL, 1 = NTSC
+  const int custom_on = b[p + 1];
+  const char hz_txt[4] = {static_cast<char>(b[p + 2]), static_cast<char>(b[p + 3]),
+                          static_cast<char>(b[p + 4]), '\0'};  // 3 ASCII digits
+
+  t.hz = frames_mode == 1 ? 60.0 : 50.0;
+  if (custom_on) {
+    const int hz = std::atoi(hz_txt);
+    if (hz > 1 && hz < 1000) t.hz = hz;
+  }
+  t.bpm = bpm_from(t.hz, time_base, speed1, speed2, highlight_a);
+  return t;
+}
+
+// Note-ons from Furnace's `-view commands` log: lines of the shape
+//
+//     72 | 0: NOTE_ON(60, 15)
+//     ^tick ^channel
+//
+// This is the whole point of using it -- a tracker issues NOTE_ON for *every*
+// pattern note, including one that only changes pitch while the envelope keeps
+// sounding, which is exactly what audio-domain onset detection cannot see.
+//
+// With -outmode perchan the song is replayed once per channel and the log
+// repeats verbatim (ticks restarting at 0 each pass), so dedupe on (tick,
+// channel) -- one channel cannot start two notes on the same tick.
+std::map<int, std::vector<long>> parse_note_ons(const fs::path& cmds,
+                                                double frames_per_tick,
+                                                long total_frames,
+                                                int sample_rate) {
+  std::ifstream in(cmds);
+  std::set<std::pair<long, int>> seen;  // (tick, channel)
+  std::string line;
+  while (std::getline(in, line)) {
+    long tick = 0;
+    int chan = 0;
+    char name[32] = {0};
+    if (std::sscanf(line.c_str(), " %ld | %d: %31[A-Z_]", &tick, &chan, name) != 3)
+      continue;
+    if (std::strcmp(name, "NOTE_ON") != 0) continue;
+    if (tick < 0 || chan < 0) continue;
+    seen.emplace(tick, chan);
+  }
+
+  // A looping song emits the loop point's note-ons at the tick *after* its last
+  // one -- i.e. at the end of the audio, where there is nothing left to slice.
+  // Furnace's render can overrun that tick by a frame or two, so requiring the
+  // note to land strictly inside the buffer is not enough: demand that it has
+  // some audible length, or it becomes a 2-frame keysound.
+  const long min_slice = std::max<long>(1, sample_rate / 100);  // 10 ms
+
+  std::map<int, std::vector<long>> per_channel;
+  for (const std::pair<long, int>& e : seen) {
+    const long frame = static_cast<long>(std::llround(e.first * frames_per_tick));
+    if (frame + min_slice > total_frames) continue;
+    per_channel[e.second].push_back(frame);
+  }
+  for (auto& kv : per_channel) std::sort(kv.second.begin(), kv.second.end());
+  return per_channel;
 }
 
 // std::system returns a wait status, not an exit code: a plain failure comes
@@ -141,6 +295,7 @@ std::vector<float> read_wav_stereo(const fs::path& path, int& rate) {
 // export plays the song through once by default -- loops defaults to 0 and
 // there is no fade-out -- which is exactly what slicing wants.
 StemSong render_stems(const std::string& bin, const std::string& input_path,
+                      const std::vector<std::uint8_t>& raw,
                       const ConvertOptions& opts) {
   const fs::path input = fs::absolute(input_path);
   TempDir tmp(fs::path(input_path).stem().string());
@@ -150,11 +305,16 @@ StemSong render_stems(const std::string& bin, const std::string& input_path,
   // max_loops counts total plays; Furnace's -loops counts *extra* ones.
   const int extra = opts.max_loops > 1 ? opts.max_loops - 1 : 0;
 
+  // -view commands dumps every engine command with its tick, on stdout; that is
+  // where the real note events come from. stderr stays separate so the log we
+  // quote back on failure is not full of note spam.
+  const fs::path cmds = tmp.path / "commands.txt";
   std::ostringstream cmd;
-  cmd << quote(bin) << " -loglevel error -noreport -nostatus"
+  cmd << quote(bin) << " -loglevel error -noreport -nostatus -view commands"
       << " -loops " << extra << " -outmode perchan"
       << " -output " << quote((tmp.path / "out.wav").string()) << " "
-      << quote(input.string()) << " > " << quote(log.string()) << " 2>&1";
+      << quote(input.string()) << " > " << quote(cmds.string()) << " 2> "
+      << quote(log.string());
 
   report(opts, "rendering chip channels with Furnace (a long song takes a "
                 "while -- each channel is a separate playback pass)...");
@@ -232,6 +392,49 @@ StemSong render_stems(const std::string& bin, const std::string& input_path,
                 song.stems.size(),
                 static_cast<double>(song.total_frames) / song.sample_rate);
   report(opts, msg);
+
+  // The module's real note events, if we can line them up with the stems.
+  const Timing timing = module_timing(raw, song.format);
+  song.bpm = timing.bpm;  // 0 -> convert_stems infers one
+  const double hz = timing.hz;
+  if (hz > 0.0) {
+    const double fpt = song.sample_rate / hz;
+    const std::map<int, std::vector<long>> notes =
+        parse_note_ons(cmds, fpt, song.total_frames, song.sample_rate);
+
+    // Furnace merges operator-split channels (Genesis extended CH3) into one
+    // stem, so a command-stream channel index does not always address the stem
+    // it sounds on. Only trust the mapping when the counts agree; otherwise the
+    // notes would land on the wrong keysounds, and detected onsets -- lossy as
+    // they are -- are the safer answer.
+    const int highest = notes.empty() ? -1 : notes.rbegin()->first;
+    if (!notes.empty() && highest < static_cast<int>(song.stems.size())) {
+      song.onsets.assign(song.stems.size(), {});
+      long total = 0;
+      for (const auto& kv : notes) {
+        song.onsets[kv.first] = kv.second;
+        total += static_cast<long>(kv.second.size());
+      }
+      char m[160];
+      if (timing.bpm > 0.0)
+        std::snprintf(m, sizeof(m),
+                      "read %ld note events from Furnace's command stream "
+                      "(%g Hz tick rate, %g BPM)",
+                      total, hz, timing.bpm);
+      else
+        std::snprintf(m, sizeof(m),
+                      "read %ld note events from Furnace's command stream "
+                      "(%g Hz tick rate)",
+                      total, hz);
+      report(opts, m);
+    } else if (!notes.empty()) {
+      report(opts,
+             "note events span " + std::to_string(highest + 1) +
+                 " channels but Furnace merged them into " +
+                 std::to_string(song.stems.size()) +
+                 " stems; falling back to onset detection");
+    }
+  }
   return song;
 }
 
@@ -285,9 +488,10 @@ std::string resolve_furnace(const std::string& given) {
 ConvertResult convert_furnace(const std::vector<std::uint8_t>& bytes,
                               const std::string& input_path,
                               const ConvertOptions& opts) {
-  (void)bytes;  // Furnace reads the file itself
+  // Furnace renders from the file itself; we read `bytes` only for the tick
+  // rate, which turns its command stream's ticks into frames.
   const std::string bin = resolve_furnace(opts.furnace_path);
-  const StemSong song = render_stems(bin, input_path, opts);
+  const StemSong song = render_stems(bin, input_path, bytes, opts);
   return convert_stems(song, input_path, opts);
 }
 

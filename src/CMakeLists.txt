@@ -33,7 +33,8 @@ target_include_directories(circus2bmson
 
 target_link_libraries(circus2bmson
   PUBLIC c2b_vendor
-  PRIVATE PkgConfig::LIBOPENMPT PkgConfig::VORBISENC PkgConfig::FLUIDSYNTH)
+  PRIVATE PkgConfig::LIBOPENMPT PkgConfig::VORBISENC PkgConfig::FLUIDSYNTH
+          PkgConfig::ZLIB)
 
 target_compile_definitions(circus2bmson
   PRIVATE C2B_VERSION="${PROJECT_VERSION}")

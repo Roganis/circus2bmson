@@ -30,6 +30,18 @@ struct StemSong {
   long total_frames = 0;                  // rendered length, in frames
   std::vector<std::string> voice_names;   // one per stem, for keysound names
   std::vector<std::vector<float>> stems;  // interleaved stereo, one per voice
+
+  // Known note-on frames per voice, when the backend can supply them (the
+  // Furnace backend reads them out of the renderer's command stream). Empty ->
+  // fall back to detecting them from the audio, which cannot see a note that is
+  // only a pitch change. Prefer these whenever they exist.
+  std::vector<std::vector<long>> onsets;
+
+  // The module's real tempo, when the backend can read it. 0 -> guess one from
+  // the note spacing. Note timing is exact either way (pulses come from frames);
+  // this decides where the bmson's gridlines and bars fall, which is what makes
+  // the result editable in a chart editor.
+  double bpm = 0.0;
 };
 
 // Detect each stem's note onsets, slice it at them, deduplicate identical PCM,

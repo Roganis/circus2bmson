@@ -3,13 +3,19 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
+#include <queue>
 #include <set>
 #include <stdexcept>
+#include <thread>
 #include <unordered_map>
+#include <utility>
 
 #include <dr_libs/dr_wav.h>
 
@@ -100,6 +106,93 @@ double infer_bpm(const std::vector<double>& onsets) {
   return bpm;
 }
 
+// Encoding a keysound is pure CPU and each one is independent, so it is the one
+// part of this worth threading -- a long chip song writes thousands of files,
+// and OGG in particular dominates the wall clock.
+//
+// Slicing, dedup and naming stay on the calling thread: they are cheap, and
+// keeping them serial keeps keysound ids and filenames deterministic (the same
+// module must convert to the same bmson every time). Only the encode-and-write
+// is handed off. The queue is bounded because the PCM waiting in it is the
+// whole song's audio -- hundreds of MB for a long module if left unbounded.
+class EncoderPool {
+ public:
+  EncoderPool(int rate, AudioFormat format, std::size_t workers)
+      : rate_(rate), format_(format) {
+    for (std::size_t i = 0; i < workers; ++i)
+      threads_.emplace_back([this] { run(); });
+  }
+
+  void submit(std::string path, std::vector<std::int16_t> pcm) {
+    std::unique_lock<std::mutex> lock(mtx_);
+    space_.wait(lock, [this] { return queue_.size() < kMaxPending; });
+    queue_.push({std::move(path), std::move(pcm)});
+    work_.notify_one();
+  }
+
+  // Drain, stop the workers, and rethrow whatever the first one that failed hit
+  // (a full disk must not pass silently for want of a return value).
+  void finish() {
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      done_ = true;
+    }
+    work_.notify_all();
+    for (std::thread& t : threads_) t.join();
+    threads_.clear();
+    if (error_) std::rethrow_exception(error_);
+  }
+
+  ~EncoderPool() {
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      done_ = true;
+    }
+    work_.notify_all();
+    for (std::thread& t : threads_)
+      if (t.joinable()) t.join();
+  }
+
+ private:
+  struct Job {
+    std::string path;
+    std::vector<std::int16_t> pcm;
+  };
+  static constexpr std::size_t kMaxPending = 64;
+
+  void run() {
+    for (;;) {
+      Job job;
+      {
+        std::unique_lock<std::mutex> lock(mtx_);
+        work_.wait(lock, [this] { return !queue_.empty() || done_; });
+        if (queue_.empty()) return;  // done_ and drained
+        job = std::move(queue_.front());
+        queue_.pop();
+      }
+      space_.notify_one();
+      try {
+        if (format_ == AudioFormat::Ogg)
+          write_ogg(job.path, job.pcm, rate_);
+        else
+          write_wav(job.path, job.pcm, rate_);
+      } catch (...) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        if (!error_) error_ = std::current_exception();
+      }
+    }
+  }
+
+  const int rate_;
+  const AudioFormat format_;
+  std::vector<std::thread> threads_;
+  std::queue<Job> queue_;
+  std::mutex mtx_;
+  std::condition_variable work_, space_;
+  bool done_ = false;
+  std::exception_ptr error_;
+};
+
 }  // namespace
 
 ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
@@ -108,21 +201,29 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
   const int rate = song.sample_rate;
   const std::vector<std::vector<float>>& stems = song.stems;
 
-  // Onsets per voice, plus a merged list for BPM inference.
-  report(opts, "detecting note onsets in " + std::to_string(stems.size()) +
-                   " channels...");
-  std::vector<std::vector<long>> onsets(stems.size());
-  std::vector<double> merged;
-  for (std::size_t v = 0; v < stems.size(); ++v) {
-    onsets[v] = detect_onsets(stems[v].data(),
-                              static_cast<long>(stems[v].size() / 2), rate);
-    for (long f : onsets[v]) merged.push_back(static_cast<double>(f) / rate);
+  // Note-ons per voice. Real note events when the backend has them; otherwise
+  // recover what we can from the audio (which misses any note that is only a
+  // pitch change -- see onset.hpp).
+  std::vector<std::vector<long>> onsets = song.onsets;
+  if (onsets.size() == stems.size()) {
+    report(opts, "using the module's own note events");
+  } else {
+    report(opts, "detecting note onsets in " + std::to_string(stems.size()) +
+                     " channels...");
+    onsets.assign(stems.size(), {});
+    for (std::size_t v = 0; v < stems.size(); ++v)
+      onsets[v] = detect_onsets(stems[v].data(),
+                                static_cast<long>(stems[v].size() / 2), rate);
   }
+
+  std::vector<double> merged;
+  for (const std::vector<long>& v : onsets)
+    for (long f : v) merged.push_back(static_cast<double>(f) / rate);
   std::sort(merged.begin(), merged.end());
   report(opts, "found " + std::to_string(merged.size()) + " notes");
 
   constexpr int kResolution = 480;
-  const double bpm = infer_bpm(merged);
+  const double bpm = song.bpm > 0.0 ? song.bpm : infer_bpm(merged);
   auto pulse_at = [&](long frame) {
     return static_cast<long>(std::llround(static_cast<double>(frame) / rate *
                                           bpm / 60.0 * kResolution));
@@ -140,11 +241,15 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
   const bool render = opts.render_audio;
 
   const long expected = static_cast<long>(merged.size());
+  unsigned workers = std::thread::hardware_concurrency();
+  if (workers == 0) workers = 2;
+  workers = std::min(workers, 8u);  // I/O-bound past this; don't thrash
   if (render)
     report(opts, "slicing and encoding " + std::to_string(expected) +
                      " keysounds (" +
                      (opts.audio_format == AudioFormat::Ogg ? "ogg" : "wav") +
-                     ")...");
+                     ", " + std::to_string(workers) + " threads)...");
+  EncoderPool pool(rate, opts.audio_format, workers);
   long next_tick = 0;  // report roughly every 10%
 
   for (std::size_t v = 0; v < stems.size(); ++v) {
@@ -184,11 +289,7 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
           for (int x = 2; used_names.count(name); ++x)
             name = base + "_" + std::to_string(x) + ext;
           used_names.insert(name);
-          const std::string path = (out_dir / name).string();
-          if (opts.audio_format == AudioFormat::Ogg)
-            write_ogg(path, pcm, rate);
-          else
-            write_wav(path, pcm, rate);
+          pool.submit((out_dir / name).string(), std::move(pcm));
           SoundChannel sc;
           sc.name = name;
           channels.push_back(std::move(sc));
@@ -205,6 +306,8 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
       channels[id].note_pulses.push_back(pulse);
     }
   }
+
+  pool.finish();  // waits for the encoders; rethrows if any of them failed
 
   if (render)
     report(opts, "wrote " + std::to_string(channels.size()) +

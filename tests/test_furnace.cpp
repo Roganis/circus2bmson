@@ -6,6 +6,7 @@
 // The fixture is built here rather than committed so the repo carries no
 // third-party module, and so the exact DMF layout is spelled out in code -- the
 // same trick test_chip.cpp uses for its VGM.
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -46,11 +47,14 @@ void pstr(std::vector<uint8_t>& v, const char* s) {  // length-prefixed string
   for (char c : t) v.push_back(static_cast<uint8_t>(c));
 }
 
-// A DMF is a zlib stream. Four notes on channel 0, each followed by a NOTE OFF
-// so the envelope dips between them: the onset detector keys on amplitude, and
-// a chip square wave sliding from pitch to pitch with no gap is exactly the
-// legato case it cannot see (onset.hpp). Real modules do hit that limit -- which
-// is why parsing the pattern data for an exact score is the next step.
+// A DMF is a zlib stream. Four notes on channel 0 and *no* note-offs: the chip
+// just gets reprogrammed to a new pitch while the square wave keeps sounding.
+// This is the case audio-domain onset detection cannot see -- there is no
+// amplitude dip to key on, so it reports one long note instead of four, and a
+// melodic line converts into one giant keysound. Chip music is full of it.
+//
+// The backend therefore takes its notes from Furnace's command stream, where
+// each of these is a NOTE_ON. If this test ever reports 1 note, that regressed.
 std::vector<uint8_t> make_dmf() {
   std::vector<uint8_t> b;
   const char* magic = ".DelekDefleMask.";
@@ -89,29 +93,23 @@ std::vector<uint8_t> make_dmf() {
 
   u8v(b, 0);  // WAVETABLES: none
 
-  // PATTERNS. Note 12 is C (not 0); 100 is NOTE OFF; -1 means "empty".
+  // PATTERNS. Note 12 is C (not 0); 100 would be NOTE OFF; -1 means "empty".
+  // Deliberately no note-offs: the four notes run straight into each other.
   const int note_row[4] = {0, 4, 8, 12};
-  const int note_val[4] = {12, 4, 7, 12};  // C-3 E-3 G-3 C-4
+  const int note_val[4] = {12, 4, 7, 12};  // C, E, G, C
   const int note_oct[4] = {3, 3, 3, 4};
-  const int off_row[4] = {2, 6, 10, 14};
   for (int c = 0; c < kChans; ++c) {
     u8v(b, kFxCols);  // effect column count is per channel
     for (int m = 0; m < kMatrix; ++m) {
       for (int row = 0; row < kRows; ++row) {
-        int k = -1, o = -1;
+        int k = -1;
         for (int i = 0; i < 4; ++i)
           if (note_row[i] == row) k = i;
-        for (int i = 0; i < 4; ++i)
-          if (off_row[i] == row) o = i;
 
         if (c == 0 && k >= 0) {
           i16v(b, note_val[k]);
           i16v(b, note_oct[k]);
           i16v(b, 15);  // volume
-        } else if (c == 0 && o >= 0) {
-          i16v(b, 100);  // NOTE OFF (octave ignored)
-          i16v(b, 0);
-          i16v(b, -1);
         } else {
           i16v(b, 0);
           i16v(b, 0);
@@ -182,10 +180,16 @@ int main() {
 
   CHECK_MSG(r.format == "dmf", "format='%s'", r.format.c_str());
   CHECK_MSG(r.channels == kChans, "channels=%d want %d", r.channels, kChans);
-  // Four note-ons, each its own keysound (chip stems never repeat byte-exactly).
-  CHECK_MSG(r.note_count == 4, "notes=%zu want 4", r.note_count);
+  // The four legato notes, from the command stream. Onset detection sees one.
+  CHECK_MSG(r.note_count == 4, "notes=%zu want 4 (legato notes missed?)",
+            r.note_count);
   CHECK(r.keysound_count == 4);
   CHECK(r.audio_rendered);
+
+  // Tempo read from the module, not guessed: 60 Hz / (speed 6 * 4 rows-per-beat)
+  // = 150 BPM exactly.
+  CHECK_MSG(std::fabs(r.init_bpm - 150.0) < 0.01, "init_bpm=%.3f want 150",
+            r.init_bpm);
 
   // 16 rows at speed 6, 60 Hz -> 16 * 6 / 60 = 1.6 s.
   CHECK_MSG(r.total_seconds > 1.5 && r.total_seconds < 1.7, "%.3f s",
