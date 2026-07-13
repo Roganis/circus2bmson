@@ -60,6 +60,21 @@ std::string quote(const std::string& s) {
   return "\"" + s + "\"";
 }
 
+// std::system() hands the string to `cmd /c` on Windows, which strips the
+// command's outermost quote pair unless the whole thing is one bare quoted
+// program name -- ours is not, since it redirects and quotes several paths. The
+// strip lands on the opening quote of the binary and the closing quote of the
+// last path, leaving a mangled command line that cmd rejects with "the system
+// cannot find the path specified". Quoting the command itself gives cmd a pair
+// it can safely take away.
+std::string shell_command(const std::string& cmd) {
+#ifdef _WIN32
+  return "\"" + cmd + "\"";
+#else
+  return cmd;
+#endif
+}
+
 // Both formats are (usually) whole-file zlib streams. Returns the input
 // unchanged when it is not one -- .fur is sometimes stored uncompressed.
 std::vector<std::uint8_t> inflate_all(const std::vector<std::uint8_t>& in) {
@@ -368,7 +383,7 @@ StemSong render_stems(const std::string& bin, const std::string& input_path,
     });
   }
 
-  const int rc = std::system(cmd.str().c_str());
+  const int rc = std::system(shell_command(cmd.str()).c_str());
   done.store(true);
   if (watcher.joinable()) watcher.join();
 
