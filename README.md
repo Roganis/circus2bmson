@@ -69,6 +69,16 @@ keysounds*) collapses ones that differ by less than N dB: on that module, 40 dB
 is that consecutive keysounds are meant to butt together seamlessly, so
 substituting a near-match can leave a faint seam; byte-exact is the default.
 
+**Chip charts are turned up by default.** Played back at the chip's own level a
+converted chart is ~5 dB quieter than everything else in a player's library: a
+Genesis mix peaks at full scale but has a ~16 dB crest factor, where a mastered
+BMS is limited to 8–10 dB. Limiting the mix properly is not open to us — the
+*player* sums the keysounds, and a time-varying gain would make every repeat of
+a note unique and undo the deduplication. So `--gain auto` (the default, chip
+backends only) instead finds the loudest flat gain that clips no more than 0.1 %
+of the mix, which is worth about +5 dB because chip peaks are short and sparse.
+`--gain 0` keeps the original level, `--gain N` sets it by hand.
+
 **Both chip tiers: keysounds do not sum back to the original mix.** These chips
 mix their channels *non-linearly* in hardware and the emulators model that
 faithfully, but a BMS player sums keysounds linearly. Measured residual of

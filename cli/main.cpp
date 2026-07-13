@@ -25,6 +25,11 @@ void print_usage(const char* argv0) {
       << "  --format FMT        keysound files: wav (default) | ogg\n"
       << "  --soundfont FILE    SoundFont (.sf2) for MIDI input\n"
       << "  --furnace FILE      Furnace binary, to render .dmf/.fur input\n"
+      << "  --gain DB|auto      keysound gain for chip/.dmf/.fur (default auto:\n"
+      << "                      the loudest that clips under 0.1% of the mix,\n"
+      << "                      ~+5 dB on a Genesis song -- these play back at\n"
+      << "                      the chip's level, well under a mastered BMS).\n"
+      << "                      --gain 0 keeps the original level.\n"
       << "  --dedup-tolerance N merge keysounds that differ by less than N dB\n"
       << "                      (chip/.dmf/.fur; try 40, or 30 to be stricter;\n"
       << "                      0 = byte-exact, the default)\n"
@@ -150,6 +155,17 @@ int main(int argc, char** argv) {
         return 2;
       }
       opts.keysound_attack_ms = std::atof(argv[i]);
+    } else if (a == "--gain") {
+      if (++i >= argc) {
+        std::cerr << "error: missing argument for " << a << "\n";
+        return 2;
+      }
+      if (std::string(argv[i]) == "auto") {
+        opts.auto_gain = true;
+      } else {
+        opts.auto_gain = false;  // an explicit number means exactly that
+        opts.gain_db = std::atof(argv[i]);
+      }
     } else if (a == "--volume-ramping") {
       opts.volume_ramping = true;
     } else if (a == "--no-audio") {

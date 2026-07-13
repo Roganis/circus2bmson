@@ -76,6 +76,30 @@ struct ConvertOptions {
   // occasional pop where a substituted keysound starts on a non-zero sample.
   // <0 -> pick the default for the mode.
   double keysound_attack_ms = -1.0;
+  // Gain applied to every keysound, in dB. The converted chart plays back at the
+  // level the chip actually produced, which is a lot quieter than a mastered BMS
+  // -- a Genesis mix peaks near full scale but has a ~16 dB crest factor, where
+  // a commercial chart is limited to 8-10 dB. Matching that properly needs a
+  // limiter across the *mix*, which we cannot do: the player sums the keysounds,
+  // and a time-varying gain would make every repeat of a note unique and undo
+  // the deduplication entirely.
+  //
+  // So instead: turn it up, and accept that the rare peak clips. See auto_gain.
+  double gain_db = 0.0;
+
+  // Pick gain_db automatically: the loudest setting at which no more than
+  // clip_budget of the summed mix's samples would exceed full scale. Peaks in
+  // chip music are short and sparse, so a small budget buys real loudness --
+  // 0.1% is worth ~5 dB on a Genesis module, against the 0.8 dB that clipping
+  // nothing at all would allow. Overrides gain_db.
+  //
+  // On by default: left alone, a chip chart is ~5 dB quieter than everything
+  // else in a player's library, which is worse than a peak clipped once in a
+  // thousand samples. Only the stem backends (chip / .dmf / .fur) use this --
+  // the tracker and MIDI paths are untouched.
+  bool auto_gain = true;
+  double clip_budget = 0.001;  // fraction of samples allowed to clip (0.1%)
+
   // Optional: called as the conversion moves through its slow stages, so a UI
   // can say what it is doing -- a long chip conversion spends minutes rendering
   // and encoding, and a silent "converting..." is indistinguishable from a

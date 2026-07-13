@@ -41,6 +41,8 @@ struct AppState {
   int naming = 0;             // 0 = Channel, 1 = Instrument, 2 = Lane
   int dedup = 0;              // 0 = exact, 1 = -40 dB, 2 = -30 dB, 3 = ignore phase
   float attack_ms = 0.3f;     // keysound fade-in; only used when dedup == 3
+  bool auto_gain = true;      // lift chip charts to a normal listening level
+  float gain_db = 0.0f;       // used when auto_gain is off
   int max_loops = 1;
   bool volume_ramping = false;
   bool honor_cc = true;       // apply the MIDI's own CC7/CC11 volume
@@ -178,6 +180,8 @@ void start_convert(AppState& s) {
   opts.dedup_tolerance_db = s.dedup == 1 ? 40.0 : s.dedup == 2 ? 30.0 : 0.0;
   opts.dedup_ignore_phase = s.dedup == 3;
   if (s.dedup == 3) opts.keysound_attack_ms = s.attack_ms;
+  opts.auto_gain = s.auto_gain;
+  opts.gain_db = s.gain_db;
   opts.volume_ramping = s.volume_ramping;
   opts.soundfont_path = s.soundfont;  // used for MIDI input
   // Bake the live mixer settings into the keysounds; otherwise just honour the
@@ -283,6 +287,15 @@ void draw_ui(AppState& s) {
   ImGui::RadioButton("OGG", &s.audio_format, 1);
   ImGui::SetNextItemWidth(180);
   ImGui::Combo("Keysound names", &s.naming, "Channel\0Instrument\0Lane\0");
+  ImGui::Checkbox("Boost volume to a normal level", &s.auto_gain);
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip(
+        "Chip music plays back at the chip's own level, which is far quieter\n"
+        "than a mastered BMS: it peaks at full scale but its average is ~16 dB\n"
+        "below it. This picks the loudest gain that clips under 0.1%% of the\n"
+        "mix -- around +5 dB on a Genesis song.");
+  if (!s.auto_gain) ImGui::SliderFloat("Gain (dB)", &s.gain_db, -12.0f, 12.0f, "%.1f");
+
   ImGui::Combo("Merge keysounds", &s.dedup,
                "Identical only\0Sounding the same (-40 dB)\0"
                "Sounding close (-30 dB)\0Ignore phase (experimental)\0");

@@ -68,14 +68,52 @@ long trim_end(const std::vector<float>& stem, long start, long end) {
 
 // Quantise stem[start, end) to interleaved int16. `end` is already trimmed.
 std::vector<std::int16_t> slice_pcm(const std::vector<float>& stem, long start,
-                                    long end) {
+                                    long end, float gain) {
   std::vector<std::int16_t> pcm;
   pcm.reserve(static_cast<std::size_t>(2 * (end - start)));
   for (long f = start; f < end; ++f) {
-    pcm.push_back(to_i16(stem[2 * f]));
-    pcm.push_back(to_i16(stem[2 * f + 1]));
+    pcm.push_back(to_i16(stem[2 * f] * gain));
+    pcm.push_back(to_i16(stem[2 * f + 1] * gain));
   }
   return pcm;
+}
+
+// The gain to give every keysound so the mix comes out as loud as it can while
+// clipping no more than `budget` of its samples.
+//
+// The player sums the keysounds, so the sum of the stems is exactly what it will
+// produce -- we can measure the real thing rather than estimate it. The chip mix
+// peaks near full scale already, so clipping *nothing* buys under a dB; but its
+// peaks are short and sparse, and letting a thousandth of the samples over the
+// rail is worth several dB of loudness, which is the difference between a chart
+// that sits well against others and one that sounds broken.
+double auto_gain_for(const std::vector<std::vector<float>>& stems, long frames,
+                     double budget) {
+  if (stems.empty() || frames <= 0) return 1.0;
+
+  std::vector<float> peaks;  // per frame, the louder of the two channels
+  peaks.reserve(static_cast<std::size_t>(frames));
+  for (long f = 0; f < frames; ++f) {
+    float l = 0.0f, r = 0.0f;
+    for (const std::vector<float>& s : stems) {
+      if (2 * f + 1 < static_cast<long>(s.size())) {
+        l += s[2 * f];
+        r += s[2 * f + 1];
+      }
+    }
+    peaks.push_back(std::max(std::fabs(l), std::fabs(r)));
+  }
+  if (peaks.empty()) return 1.0;
+
+  // The level that only `budget` of the frames exceed.
+  std::size_t k = static_cast<std::size_t>((1.0 - budget) * peaks.size());
+  if (k >= peaks.size()) k = peaks.size() - 1;
+  std::nth_element(peaks.begin(), peaks.begin() + k, peaks.end());
+  const float thresh = peaks[k];
+  if (thresh <= 1.0e-6f) return 1.0;
+
+  const double gain = 0.999 / thresh;
+  return std::min(std::max(gain, 1.0), 8.0);  // never turn it down; cap at +18 dB
 }
 
 // Root-mean-square of stem[start, end), for the near-duplicate test below.
@@ -398,6 +436,18 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
   if (!out_dir.empty()) fs::create_directories(out_dir);
   const char* ext = audio_extension(opts.audio_format);
 
+  float gain = static_cast<float>(std::pow(10.0, opts.gain_db / 20.0));
+  if (opts.render_audio && opts.auto_gain) {
+    gain = static_cast<float>(
+        auto_gain_for(stems, song.total_frames, opts.clip_budget));
+    char m[128];
+    std::snprintf(m, sizeof(m),
+                  "gain %+.1f dB (loudest that keeps clipping under %.2f%% of "
+                  "the mix)",
+                  20.0 * std::log10(gain), 100.0 * opts.clip_budget);
+    report(opts, m);
+  }
+
   // Slice each voice at its onsets, dedup identical PCM, place at exact time.
   std::unordered_map<std::string, int> dedup;  // raw PCM -> keysound id
   std::set<std::string> used_names;
@@ -480,7 +530,7 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
       int id;
       if (render) {
         const long tend = trim_end(stems[v], start, end);
-        std::vector<std::int16_t> pcm = slice_pcm(stems[v], start, tend);
+        std::vector<std::int16_t> pcm = slice_pcm(stems[v], start, tend, gain);
         ++total_slices;
         std::string raw(reinterpret_cast<const char*>(pcm.data()),
                         pcm.size() * sizeof(std::int16_t));
