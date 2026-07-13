@@ -175,6 +175,7 @@ void start_convert(AppState& s) {
                                          : KeysoundNaming::Channel;
   opts.max_loops = s.max_loops < 1 ? 1 : s.max_loops;
   opts.dedup_tolerance_db = s.dedup == 1 ? 40.0 : s.dedup == 2 ? 30.0 : 0.0;
+  opts.dedup_ignore_phase = s.dedup == 3;
   opts.volume_ramping = s.volume_ramping;
   opts.soundfont_path = s.soundfont;  // used for MIDI input
   // Bake the live mixer settings into the keysounds; otherwise just honour the
@@ -282,13 +283,17 @@ void draw_ui(AppState& s) {
   ImGui::Combo("Keysound names", &s.naming, "Channel\0Instrument\0Lane\0");
   ImGui::Combo("Merge keysounds", &s.dedup,
                "Identical only\0Sounding the same (-40 dB)\0"
-               "Sounding close (-30 dB)\0");
+               "Sounding close (-30 dB)\0Ignore phase (experimental)\0");
   if (ImGui::IsItemHovered())
     ImGui::SetTooltip(
         "Chip and .dmf/.fur only. A repeated drum hit or held note is rarely\n"
         "byte-identical (the phase differs), so exact matching leaves lots of\n"
         "duplicates. Looser merging means fewer keysounds, but a near-match\n"
-        "substituted into a run of notes can leave a faint seam.");
+        "substituted into a run of notes can leave a faint seam.\n"
+        "\n"
+        "Ignore phase: matches on timbre alone, so the many renderings of one\n"
+        "drum collapse into one sound -- roughly a third as many keysounds.\n"
+        "Keysound edges are faded so the joins stay silent. Judge it by ear.");
   ImGui::Checkbox("Volume ramping (libopenmpt smoothing; more keysounds)",
                   &s.volume_ramping);
   ImGui::EndDisabled();

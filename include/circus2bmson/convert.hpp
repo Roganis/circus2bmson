@@ -39,6 +39,32 @@ struct ConvertOptions {
   //
   // Only the stem backends (chip / .dmf / .fur) honour this.
   double dedup_tolerance_db = 0.0;
+
+  // EXPERIMENTAL. Match keysounds on their magnitude spectrum, ignoring phase.
+  //
+  // Chip hardware re-renders "the same" sound differently every time -- a
+  // Genesis DAC drum has 61 distinct (note, volume) pairs but 491 distinct
+  // waveforms, because its resampling phase lands differently on each hit. Those
+  // are identical to the ear and unmergeable by any sample-wise comparison, so
+  // this ignores phase entirely and collapses them: ~5 500 keysounds becomes
+  // ~1 700 on a dense Genesis module.
+  //
+  // The price is that slices are fragments of a continuously sounding channel,
+  // not self-contained samples, so a phase-shifted substitute no longer joins
+  // its neighbours smoothly. To stop that from clicking, every keysound is
+  // faded at both edges (see keysound_fade_ms), which makes each one start and
+  // end at zero -- so every seam is zero-to-zero and no substitution can step.
+  // That fade is itself audible as a slight dip at every note boundary.
+  //
+  // Judge it by ear: measured against the original render it scores far worse
+  // (-6 dB vs -47 dB) purely because phase differs, which the ear largely does
+  // not hear. Off by default.
+  bool dedup_ignore_phase = false;
+
+  // Fade applied to each keysound's edges, in milliseconds. Defaults to 0 (none)
+  // and to 2 ms when dedup_ignore_phase is on, where it is what keeps the seams
+  // silent. Set explicitly to override either way.
+  double keysound_fade_ms = -1.0;  // <0 -> pick the default for the mode
   // Optional: called as the conversion moves through its slow stages, so a UI
   // can say what it is doing -- a long chip conversion spends minutes rendering
   // and encoding, and a silent "converting..." is indistinguishable from a

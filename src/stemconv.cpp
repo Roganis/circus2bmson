@@ -107,6 +107,110 @@ double residual_db(const std::vector<float>& a, long a0, const std::vector<float
   return 20.0 * std::log10(rms_d / rms_a + 1e-12);
 }
 
+// --- phase-insensitive matching -------------------------------------------
+//
+// A fingerprint that says *what a slice sounds like* while ignoring *when its
+// waveform happens to start*: the magnitude spectrum, which throws phase away.
+// Two renderings of the same drum differ wildly sample-by-sample and hardly at
+// all here.
+
+// In-place iterative radix-2 FFT. Only the magnitudes are wanted, so this stays
+// as small as it can be rather than pulling in a dependency.
+void fft(std::vector<float>& re, std::vector<float>& im) {
+  const std::size_t n = re.size();
+  for (std::size_t i = 1, j = 0; i < n; ++i) {  // bit-reversal permutation
+    std::size_t bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j |= bit;
+    if (i < j) {
+      std::swap(re[i], re[j]);
+      std::swap(im[i], im[j]);
+    }
+  }
+  for (std::size_t len = 2; len <= n; len <<= 1) {
+    const double ang = -2.0 * 3.14159265358979323846 / static_cast<double>(len);
+    const float wr = static_cast<float>(std::cos(ang));
+    const float wi = static_cast<float>(std::sin(ang));
+    for (std::size_t i = 0; i < n; i += len) {
+      float cr = 1.0f, ci = 0.0f;
+      for (std::size_t k = 0; k < len / 2; ++k) {
+        const float ur = re[i + k], ui = im[i + k];
+        const float vr = re[i + k + len / 2] * cr - im[i + k + len / 2] * ci;
+        const float vi = re[i + k + len / 2] * ci + im[i + k + len / 2] * cr;
+        re[i + k] = ur + vr;
+        im[i + k] = ui + vi;
+        re[i + k + len / 2] = ur - vr;
+        im[i + k + len / 2] = ui - vi;
+        const float nr = cr * wr - ci * wi;
+        ci = cr * wi + ci * wr;
+        cr = nr;
+      }
+    }
+  }
+}
+
+// Unit-length magnitude spectrum of stem[start, end), mono and Hann-windowed.
+// Long slices are fingerprinted from their head: the length is already part of
+// the bucket key, and what a sound *is* is settled well before a third of a
+// second is out.
+constexpr std::size_t kFpFrames = 16384;  // ~0.37 s at 44.1 kHz
+constexpr std::size_t kFpBands = 128;
+
+std::vector<float> fingerprint(const std::vector<float>& stem, long start, long end) {
+  const std::size_t want =
+      std::min<std::size_t>(static_cast<std::size_t>(end - start), kFpFrames);
+  std::size_t n = 1;
+  while (n < want) n <<= 1;
+
+  std::vector<float> re(n, 0.0f), im(n, 0.0f);
+  for (std::size_t i = 0; i < want; ++i) {
+    const float w = 0.5f - 0.5f * std::cos(2.0f * 3.14159265f * i / (want > 1 ? want - 1 : 1));
+    const long f = start + static_cast<long>(i);
+    re[i] = 0.5f * (stem[2 * f] + stem[2 * f + 1]) * w;
+  }
+  fft(re, im);
+
+  // Fold the half-spectrum into a few bands: finer than that is comparing
+  // rendering noise, not timbre.
+  std::vector<float> fp(kFpBands, 0.0f);
+  const std::size_t half = n / 2;
+  for (std::size_t k = 0; k < half; ++k) {
+    const std::size_t b = std::min(kFpBands - 1, k * kFpBands / (half ? half : 1));
+    fp[b] += std::sqrt(re[k] * re[k] + im[k] * im[k]);
+  }
+  double norm = 0.0;
+  for (float v : fp) norm += static_cast<double>(v) * v;
+  norm = std::sqrt(norm);
+  if (norm > 0.0)
+    for (float& v : fp) v = static_cast<float>(v / norm);
+  return fp;
+}
+
+double cosine(const std::vector<float>& a, const std::vector<float>& b) {
+  double d = 0.0;
+  for (std::size_t i = 0; i < a.size() && i < b.size(); ++i)
+    d += static_cast<double>(a[i]) * b[i];
+  return d;
+}
+
+// Fade both edges to zero, so a keysound always starts and ends at silence and
+// the joins between consecutive ones cannot step -- which is what makes
+// substituting a phase-shifted near-match safe.
+void fade_edges(std::vector<std::int16_t>& pcm, int rate, double fade_ms) {
+  if (fade_ms <= 0.0 || pcm.empty()) return;
+  const long frames = static_cast<long>(pcm.size() / 2);
+  long f = static_cast<long>(fade_ms * rate / 1000.0);
+  f = std::min(f, frames / 2);
+  for (long i = 0; i < f; ++i) {
+    const float g = static_cast<float>(i) / static_cast<float>(f);
+    pcm[2 * i] = static_cast<std::int16_t>(std::lrintf(pcm[2 * i] * g));
+    pcm[2 * i + 1] = static_cast<std::int16_t>(std::lrintf(pcm[2 * i + 1] * g));
+    const long j = frames - 1 - i;
+    pcm[2 * j] = static_cast<std::int16_t>(std::lrintf(pcm[2 * j] * g));
+    pcm[2 * j + 1] = static_cast<std::int16_t>(std::lrintf(pcm[2 * j + 1] * g));
+  }
+}
+
 void write_wav(const std::string& path, const std::vector<std::int16_t>& pcm,
                int rate) {
   drwav_data_format fmt{};
@@ -284,9 +388,20 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
     long start = 0, end = 0;
     double rms = 0.0;
     int id = 0;
+    std::vector<float> fp;  // magnitude spectrum, only in ignore-phase mode
   };
   const double tolerance = -std::fabs(opts.dedup_tolerance_db);
-  const bool tolerant = render && opts.dedup_tolerance_db > 0.0;
+  const bool ignore_phase = render && opts.dedup_ignore_phase;
+  const bool tolerant = render && (opts.dedup_tolerance_db > 0.0 || ignore_phase);
+  // Two spectra this close are the same sound; below it they are not. Chosen by
+  // measuring against a Genesis module -- tighter keeps near-identical drum hits
+  // apart, looser starts merging different notes.
+  constexpr double kSameSound = 0.995;
+  // With phase thrown away, keysounds no longer join smoothly, so fade their
+  // edges to zero and every seam becomes silence-to-silence.
+  const double fade_ms = opts.keysound_fade_ms >= 0.0 ? opts.keysound_fade_ms
+                         : ignore_phase             ? 2.0
+                                                    : 0.0;
   std::map<std::pair<std::size_t, long>, std::vector<Rep>> reps;  // (voice, len)
   long merged_count = 0;
 
@@ -337,8 +452,20 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
           const long len = tend - start;
           const double rms = slice_rms(stems[v], start, tend);
           std::vector<Rep>& bucket = reps[{v, len}];
+          std::vector<float> fp;
+          if (ignore_phase) fp = fingerprint(stems[v], start, tend);
+
           if (rms > 0.0) {
             for (const Rep& r : bucket) {
+              if (ignore_phase) {
+                // Same timbre, whatever the phase. This is the only test that
+                // can see two renderings of one drum as one sound.
+                if (cosine(fp, r.fp) > kSameSound) {
+                  near = r.id;
+                  break;
+                }
+                continue;
+              }
               // rms(a - b) >= |rms(a) - rms(b)|, so a big level difference
               // cannot possibly come in under the tolerance -- skip the work.
               const double floor_db =
@@ -352,7 +479,8 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
             }
           }
           if (near < 0)
-            bucket.push_back({start, tend, rms, static_cast<int>(channels.size())});
+            bucket.push_back({start, tend, rms, static_cast<int>(channels.size()),
+                              std::move(fp)});
           else
             ++merged_count;
         }
@@ -370,6 +498,7 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
           for (int x = 2; used_names.count(name); ++x)
             name = base + "_" + std::to_string(x) + ext;
           used_names.insert(name);
+          fade_edges(pcm, rate, fade_ms);
           pool.submit((out_dir / name).string(), std::move(pcm));
           SoundChannel sc;
           sc.name = name;
@@ -394,7 +523,10 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
     std::string msg = "wrote " + std::to_string(channels.size()) +
                       " unique keysounds from " + std::to_string(total_slices) +
                       " slices";
-    if (tolerant)
+    if (ignore_phase)
+      msg += " (" + std::to_string(merged_count) +
+             " merged as the same sound, ignoring phase)";
+    else if (tolerant)
       msg += " (" + std::to_string(merged_count) + " merged as near-duplicates at " +
              std::to_string(static_cast<int>(tolerance)) + " dB)";
     report(opts, msg);

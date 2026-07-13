@@ -28,6 +28,14 @@ void print_usage(const char* argv0) {
       << "  --dedup-tolerance N merge keysounds that differ by less than N dB\n"
       << "                      (chip/.dmf/.fur; try 40, or 30 to be stricter;\n"
       << "                      0 = byte-exact, the default)\n"
+      << "  --dedup-ignore-phase\n"
+      << "                      merge keysounds that sound alike but differ in\n"
+      << "                      phase (chip hardware re-renders the same drum\n"
+      << "                      differently each hit). Far fewer keysounds;\n"
+      << "                      fades each one's edges to hide the joins.\n"
+      << "                      EXPERIMENTAL -- judge it by ear.\n"
+      << "  --keysound-fade MS  fade keysound edges (default 0, or 2 with\n"
+      << "                      --dedup-ignore-phase)\n"
       << "  --max-loops N       times to unroll a looping section (default 1)\n"
       << "  --name-by WHICH     keysound names: channel (default) | instrument | lane\n"
       << "  --volume-ramping    keep libopenmpt's anti-click ramp (more keysounds)\n"
@@ -124,6 +132,14 @@ int main(int argc, char** argv) {
                      "e.g. 40 or 30 (0 = byte-exact)\n";
         return 2;
       }
+    } else if (a == "--dedup-ignore-phase") {
+      opts.dedup_ignore_phase = true;
+    } else if (a == "--keysound-fade") {
+      if (++i >= argc) {
+        std::cerr << "error: missing argument for " << a << "\n";
+        return 2;
+      }
+      opts.keysound_fade_ms = std::atof(argv[i]);
     } else if (a == "--volume-ramping") {
       opts.volume_ramping = true;
     } else if (a == "--no-audio") {
