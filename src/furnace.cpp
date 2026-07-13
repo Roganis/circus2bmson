@@ -1,6 +1,7 @@
 #include "circus2bmson/furnace.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -172,22 +173,38 @@ Timing module_timing(const std::vector<std::uint8_t>& raw, const std::string& fm
 // With -outmode perchan the song is replayed once per channel and the log
 // repeats verbatim (ticks restarting at 0 each pass), so dedupe on (tick,
 // channel) -- one channel cannot start two notes on the same tick.
-std::map<int, std::vector<long>> parse_note_ons(const fs::path& cmds,
-                                                double frames_per_tick,
-                                                long total_frames,
-                                                int sample_rate) {
+struct NoteEvent {
+  long frame = 0;
+  int id = 0;  // identity of the sound: (instrument, note, volume)
+};
+
+std::map<int, std::vector<NoteEvent>> parse_note_ons(const fs::path& cmds,
+                                                     double frames_per_tick,
+                                                     long total_frames,
+                                                     int sample_rate) {
   std::ifstream in(cmds);
-  std::set<std::pair<long, int>> seen;  // (tick, channel)
+  // (tick, channel) -> the note it starts. Dedupes the repeated passes.
+  std::map<std::pair<long, int>, std::array<int, 3>> seen;  // -> {ins, note, vol}
+  std::map<int, int> instrument;  // channel -> instrument currently selected
   std::string line;
   while (std::getline(in, line)) {
     long tick = 0;
     int chan = 0;
     char name[32] = {0};
-    if (std::sscanf(line.c_str(), " %ld | %d: %31[A-Z_]", &tick, &chan, name) != 3)
+    int a = 0, b = 0;
+    const int got = std::sscanf(line.c_str(), " %ld | %d: %31[A-Z_](%d, %d)",
+                                &tick, &chan, name, &a, &b);
+    if (got < 3 || tick < 0 || chan < 0) continue;
+
+    // The instrument is selected by its own command, before the note that uses
+    // it. The same pitch on a different instrument is a different sound, so it
+    // has to be part of the note's identity.
+    if (std::strcmp(name, "INSTRUMENT") == 0 && got >= 4) {
+      instrument[chan] = a;
       continue;
-    if (std::strcmp(name, "NOTE_ON") != 0) continue;
-    if (tick < 0 || chan < 0) continue;
-    seen.emplace(tick, chan);
+    }
+    if (std::strcmp(name, "NOTE_ON") != 0 || got < 5) continue;
+    seen[{tick, chan}] = {instrument.count(chan) ? instrument[chan] : -1, a, b};
   }
 
   // A looping song emits the loop point's note-ons at the tick *after* its last
@@ -197,13 +214,22 @@ std::map<int, std::vector<long>> parse_note_ons(const fs::path& cmds,
   // some audible length, or it becomes a 2-frame keysound.
   const long min_slice = std::max<long>(1, sample_rate / 100);  // 10 ms
 
-  std::map<int, std::vector<long>> per_channel;
-  for (const std::pair<long, int>& e : seen) {
-    const long frame = static_cast<long>(std::llround(e.first * frames_per_tick));
+  std::map<std::array<int, 3>, int> ids;  // (ins, note, vol) -> small dense id
+  std::map<int, std::vector<NoteEvent>> per_channel;
+  for (const auto& kv : seen) {
+    const long frame =
+        static_cast<long>(std::llround(kv.first.first * frames_per_tick));
     if (frame + min_slice > total_frames) continue;
-    per_channel[e.second].push_back(frame);
+    auto it = ids.find(kv.second);
+    if (it == ids.end())
+      it = ids.emplace(kv.second, static_cast<int>(ids.size())).first;
+    per_channel[kv.first.second].push_back({frame, it->second});
   }
-  for (auto& kv : per_channel) std::sort(kv.second.begin(), kv.second.end());
+  for (auto& kv : per_channel)
+    std::sort(kv.second.begin(), kv.second.end(),
+              [](const NoteEvent& x, const NoteEvent& y) {
+                return x.frame < y.frame;
+              });
   return per_channel;
 }
 
@@ -399,7 +425,7 @@ StemSong render_stems(const std::string& bin, const std::string& input_path,
   const double hz = timing.hz;
   if (hz > 0.0) {
     const double fpt = song.sample_rate / hz;
-    const std::map<int, std::vector<long>> notes =
+    const std::map<int, std::vector<NoteEvent>> notes =
         parse_note_ons(cmds, fpt, song.total_frames, song.sample_rate);
 
     // Furnace merges operator-split channels (Genesis extended CH3) into one
@@ -410,9 +436,13 @@ StemSong render_stems(const std::string& bin, const std::string& input_path,
     const int highest = notes.empty() ? -1 : notes.rbegin()->first;
     if (!notes.empty() && highest < static_cast<int>(song.stems.size())) {
       song.onsets.assign(song.stems.size(), {});
+      song.onset_ids.assign(song.stems.size(), {});
       long total = 0;
       for (const auto& kv : notes) {
-        song.onsets[kv.first] = kv.second;
+        for (const NoteEvent& e : kv.second) {
+          song.onsets[kv.first].push_back(e.frame);
+          song.onset_ids[kv.first].push_back(e.id);
+        }
         total += static_cast<long>(kv.second.size());
       }
       char m[160];

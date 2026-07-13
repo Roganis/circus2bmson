@@ -12,6 +12,7 @@
 #include <mutex>
 #include <queue>
 #include <set>
+#include <tuple>
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
@@ -170,12 +171,23 @@ std::vector<float> fingerprint(const std::vector<float>& stem, long start, long 
   }
   fft(re, im);
 
-  // Fold the half-spectrum into a few bands: finer than that is comparing
-  // rendering noise, not timbre.
+  // Fold the half-spectrum into bands spaced *logarithmically*. Linear bands
+  // would put every bass fundamental into the same one -- 128 bands across
+  // 22 kHz is 172 Hz wide, and a bass note is 60 Hz -- so two different bass
+  // notes would look like the same sound. Log spacing keeps a constant number
+  // of bands per octave, so low pitches stay as distinguishable as high ones.
   std::vector<float> fp(kFpBands, 0.0f);
   const std::size_t half = n / 2;
-  for (std::size_t k = 0; k < half; ++k) {
-    const std::size_t b = std::min(kFpBands - 1, k * kFpBands / (half ? half : 1));
+  const double bin_hz = 44100.0 / static_cast<double>(n);
+  const double lo = 30.0, hi = 20000.0;
+  const double span = std::log(hi / lo);
+  for (std::size_t k = 1; k < half; ++k) {
+    const double hz = k * bin_hz;
+    if (hz < lo) continue;
+    std::size_t b = kFpBands - 1;
+    if (hz < hi)
+      b = static_cast<std::size_t>(kFpBands * std::log(hz / lo) / span);
+    b = std::min(b, kFpBands - 1);
     fp[b] += std::sqrt(re[k] * re[k] + im[k] * im[k]);
   }
   double norm = 0.0;
@@ -391,7 +403,16 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
     std::vector<float> fp;  // magnitude spectrum, only in ignore-phase mode
   };
   const double tolerance = -std::fabs(opts.dedup_tolerance_db);
-  const bool ignore_phase = render && opts.dedup_ignore_phase;
+  // Phase-insensitive merging is only safe when we know what each note *is*:
+  // matching on a phase-blind spectrum alone happily merges a bass note with
+  // the one a tone below it, which transposes the music. Refuse rather than do
+  // that. (The libgme backend has no note events, so it never gets this.)
+  const bool have_ids = song.onset_ids.size() == stems.size();
+  const bool ignore_phase = render && opts.dedup_ignore_phase && have_ids;
+  if (render && opts.dedup_ignore_phase && !have_ids)
+    report(opts,
+           "ignoring --dedup-ignore-phase: this backend has no note events, and "
+           "without them it cannot tell two pitches apart");
   const bool tolerant = render && (opts.dedup_tolerance_db > 0.0 || ignore_phase);
   // Two spectra this close are the same sound; below it they are not. Chosen by
   // measuring against a Genesis module -- tighter keeps near-identical drum hits
@@ -402,7 +423,9 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
   const double fade_ms = opts.keysound_fade_ms >= 0.0 ? opts.keysound_fade_ms
                          : ignore_phase             ? 2.0
                                                     : 0.0;
-  std::map<std::pair<std::size_t, long>, std::vector<Rep>> reps;  // (voice, len)
+  // (voice, length, note id) -- the note id is -1 unless we know it, and in
+  // ignore-phase mode a merge can only ever happen inside one of these buckets.
+  std::map<std::tuple<std::size_t, long, int>, std::vector<Rep>> reps;
   long merged_count = 0;
 
   const long expected = static_cast<long>(merged.size());
@@ -451,7 +474,12 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
         if (found == dedup.end() && tolerant) {
           const long len = tend - start;
           const double rms = slice_rms(stems[v], start, tend);
-          std::vector<Rep>& bucket = reps[{v, len}];
+          // Same instrument, same pitch, same volume -- or, without note events,
+          // no constraint beyond the audio itself (the strict path only).
+          const int note_id =
+              (ignore_phase && k < song.onset_ids[v].size()) ? song.onset_ids[v][k]
+                                                             : -1;
+          std::vector<Rep>& bucket = reps[{v, len, note_id}];
           std::vector<float> fp;
           if (ignore_phase) fp = fingerprint(stems[v], start, tend);
 

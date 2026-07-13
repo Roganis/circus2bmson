@@ -37,6 +37,15 @@ struct StemSong {
   // only a pitch change. Prefer these whenever they exist.
   std::vector<std::vector<long>> onsets;
 
+  // What each of those notes actually is -- an opaque id per (instrument, note,
+  // volume), parallel to `onsets`. Two slices may only be merged as "the same
+  // sound" if their ids match: a phase-insensitive comparison alone cannot tell
+  // two bass notes a tone apart from each other (a spectrum coarse enough to
+  // ignore phase is coarse enough to confuse pitches), and merging across
+  // pitches transposes the music. Empty -> unknown, which disables phase-
+  // insensitive merging entirely.
+  std::vector<std::vector<int>> onset_ids;
+
   // The module's real tempo, when the backend can read it. 0 -> guess one from
   // the note spacing. Note timing is exact either way (pulses come from frames);
   // this decides where the bmson's gridlines and bars fall, which is what makes
