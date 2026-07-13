@@ -33,6 +33,12 @@ Timing stays on a **musical pulse grid** (resolution 240, one tracker row =
 row duration, and the measured duration otherwise — so pattern delay and tempo
 slides keep the grid exactly aligned with the rendered audio.
 
+The stem backends (chip, `.dmf`/`.fur`) share a second path — `src/stemconv.cpp`,
+resolution 480 — which takes a song already rendered to one stem per voice and
+turns it into keysounds. Note timing there is exact regardless of the grid,
+because pulses are computed from frames; the BPM only decides where the
+gridlines fall.
+
 ## Two tiers of fidelity
 
 Backends fall into two groups, and it is worth knowing which one your file is in.
@@ -63,11 +69,37 @@ BPM is guessed. This is the tier to be suspicious of.
 **Chip songs produce a lot of keysounds**, because every note is sliced out of
 the rendered audio and so carries its own pitch, envelope state and effects —
 nothing can be reused the way a normal chart reuses one sample across many
-notes. A dense Genesis module runs to ~5 500. `--dedup-tolerance N` (GUI: *Merge
-keysounds*) collapses ones that differ by less than N dB: on that module, 40 dB
-(an inaudible difference) gives 5 045 → 4 434 and 30 dB gives 3 895. The catch
-is that consecutive keysounds are meant to butt together seamlessly, so
-substituting a near-match can leave a faint seam; byte-exact is the default.
+notes. A dense Genesis module runs to ~5 500. Two settings collapse that (GUI:
+*Merge keysounds*), and the difference between them is worth understanding.
+
+`--dedup-tolerance N` merges slices that differ by less than N dB. It is safe —
+the audio is verified to be near-identical — but it barely helps where you would
+most expect it to: on the Genesis DAC drum channel it took 505 keysounds to 501.
+The hardware re-renders "the same" drum differently on every hit (its resampling
+phase lands somewhere new), so 61 distinct (note, volume) pairs come out as 491
+distinct waveforms. No sample-wise comparison can see those as one sound.
+
+`--dedup-ignore-phase` matches on timbre instead, so they collapse: **5 558
+slices → 1 543 keysounds**. Two things make it safe. Merges may only happen
+between notes of the same *identity* — same instrument, pitch and volume, taken
+from Furnace's command stream — because a spectrum coarse enough to ignore phase
+is coarse enough to confuse two bass notes, and merging across pitches would
+transpose the music. And since the slices are fragments of a continuously
+sounding channel rather than self-contained samples, every keysound is faded at
+both edges so it starts and ends at zero and no substitution can step at the
+join. The fade-in is short (`--keysound-attack`, 0.3 ms) so percussive attacks
+survive; the fade-out is longer (2 ms) because that edge is what keeps a seam
+quiet.
+
+| mode | keysounds | error vs the real mix |
+|---|---|---|
+| byte-exact (default) | 5 045 | −49 dB |
+| `--dedup-tolerance 40` | 4 434 | −47 dB |
+| `--dedup-tolerance 30` | 3 895 | −37 dB |
+| `--dedup-ignore-phase` | **1 543** | −6 dB *(almost all of it phase)* |
+
+That last figure looks alarming and mostly is not: sample-wise error punishes a
+phase shift brutally, and the ear barely hears one. Judge it by ear.
 
 **Chip charts are turned up by default.** Played back at the chip's own level a
 converted chart is ~5 dB quieter than everything else in a player's library: a
@@ -162,6 +194,12 @@ window), set the options (WAV/OGG, keysound naming, max-loops, volume ramping,
 output folder) and Convert. A SoundFont (`.sf2`) picker supplies the timbres for
 MIDI input (inert for tracker input).
 
+For chip and `.dmf`/`.fur` input there is also **Boost volume to a normal
+level** (on by default) and a **Merge keysounds** selector — *Identical only*,
+*−40 dB*, *−30 dB*, or *Ignore phase*, which reveals an **Attack** slider. The
+log box streams each stage as it goes, because a long chip conversion takes
+minutes and is otherwise indistinguishable from a hang.
+
 **MIDI preview / mixer.** When the input is a `.mid`/`.midi`, a **Load preview**
 button auditions it live through the SoundFont (real-time playback via
 miniaudio) with **Play/Stop** and a seek bar. Each MIDI channel and each
@@ -213,6 +251,9 @@ cmake -S . -B build -G Ninja -DC2B_BUILD_GUI=ON && cmake --build build
 ./build/cli/circus2bmson song.it -o out                  # any libopenmpt format
 ./build/cli/circus2bmson song.mod                        # -> song/song.bmson beside the file
 ./build/cli/circus2bmson song.mid --soundfont GM.sf2     # MIDI (needs a SoundFont)
+./build/cli/circus2bmson song.nsf                        # chip music (needs libgme)
+./build/cli/circus2bmson song.dmf --format ogg \
+    --dedup-ignore-phase                                 # DefleMask (needs furnace on PATH)
 ./build/cli/circus2bmson --list-formats                  # every input extension this build accepts
 ```
 
@@ -236,6 +277,15 @@ Windows you can just **drag a module onto `circus2bmson.exe`** and get a
 # --volume-ramping      keep libopenmpt's anti-click ramp (yields more keysounds)
 # --no-audio    emit the bmson skeleton only (structure, no keysounds)
 # --max-loops N unroll a looping section N times
+# --soundfont FILE      SoundFont (.sf2) for MIDI input
+#
+# chip / .dmf / .fur only:
+# --furnace FILE        the Furnace binary (else $C2B_FURNACE, else PATH)
+# --gain DB|auto        keysound gain (default auto; --gain 0 = the chip's level)
+# --dedup-tolerance N   merge keysounds differing by under N dB (try 40, or 30)
+# --dedup-ignore-phase  merge keysounds that sound alike but differ in phase
+# --keysound-attack MS  fade-in per keysound (default 0.3 with ignore-phase)
+# --keysound-fade MS    fade-out per keysound (default 2 with ignore-phase)
 ```
 
 By default keysounds are named `channel{N}_{seq}`, so they group by pattern
