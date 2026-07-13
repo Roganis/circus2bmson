@@ -53,9 +53,8 @@ std::int16_t to_i16(float f) {
   return static_cast<std::int16_t>(std::lrintf(v));
 }
 
-// Trim trailing silence and quantise stem[start, end) to interleaved int16.
-std::vector<std::int16_t> slice_pcm(const std::vector<float>& stem, long start,
-                                    long end) {
+// Where stem[start, end) really ends once trailing silence is dropped.
+long trim_end(const std::vector<float>& stem, long start, long end) {
   const long n = static_cast<long>(stem.size() / 2);
   if (start < 0) start = 0;
   long e = std::min(end, n);
@@ -63,13 +62,49 @@ std::vector<std::int16_t> slice_pcm(const std::vector<float>& stem, long start,
          std::fabs(stem[2 * (e - 1) + 1]) < kSilence)
     --e;
   if (e <= start) e = std::min(start + 1, n);
+  return e;
+}
+
+// Quantise stem[start, end) to interleaved int16. `end` is already trimmed.
+std::vector<std::int16_t> slice_pcm(const std::vector<float>& stem, long start,
+                                    long end) {
   std::vector<std::int16_t> pcm;
-  pcm.reserve(static_cast<std::size_t>(2 * (e - start)));
-  for (long f = start; f < e; ++f) {
+  pcm.reserve(static_cast<std::size_t>(2 * (end - start)));
+  for (long f = start; f < end; ++f) {
     pcm.push_back(to_i16(stem[2 * f]));
     pcm.push_back(to_i16(stem[2 * f + 1]));
   }
   return pcm;
+}
+
+// Root-mean-square of stem[start, end), for the near-duplicate test below.
+double slice_rms(const std::vector<float>& stem, long start, long end) {
+  double sum = 0.0;
+  for (long f = 2 * start; f < 2 * end; ++f)
+    sum += static_cast<double>(stem[f]) * stem[f];
+  const long n = 2 * (end - start);
+  return n > 0 ? std::sqrt(sum / n) : 0.0;
+}
+
+// How far two equal-length slices are apart, as dB relative to the first: 0 dB
+// is "completely different", -60 dB is "the same sound". Chip stems repeat a
+// drum hit or a held note with a slightly different phase or envelope tail, so
+// they are never bit-identical even when they are the same sound; this is what
+// lets those collapse into one keysound.
+//
+// Both slices are read straight out of the stems, which are already in memory --
+// keeping a copy of every unique keysound's PCM around just to compare against
+// would cost hundreds of MB on a long module.
+double residual_db(const std::vector<float>& a, long a0, const std::vector<float>& b,
+                   long b0, long frames, double rms_a) {
+  if (frames <= 0 || rms_a <= 0.0) return 0.0;
+  double sum = 0.0;
+  for (long f = 0; f < 2 * frames; ++f) {
+    const double d = static_cast<double>(a[2 * a0 + f]) - b[2 * b0 + f];
+    sum += d * d;
+  }
+  const double rms_d = std::sqrt(sum / (2 * frames));
+  return 20.0 * std::log10(rms_d / rms_a + 1e-12);
 }
 
 void write_wav(const std::string& path, const std::vector<std::int16_t>& pcm,
@@ -240,6 +275,21 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
   long total_slices = 0, note_count = 0;
   const bool render = opts.render_audio;
 
+  // Near-duplicate matching (opt-in, see ConvertOptions::dedup_tolerance_db).
+  // A keysound is remembered as a region of the stem it came from rather than a
+  // copy of its audio. Candidates are bucketed by (voice, length) because only
+  // equal-length slices can be compared sample-for-sample, which also keeps the
+  // search short.
+  struct Rep {
+    long start = 0, end = 0;
+    double rms = 0.0;
+    int id = 0;
+  };
+  const double tolerance = -std::fabs(opts.dedup_tolerance_db);
+  const bool tolerant = render && opts.dedup_tolerance_db > 0.0;
+  std::map<std::pair<std::size_t, long>, std::vector<Rep>> reps;  // (voice, len)
+  long merged_count = 0;
+
   const long expected = static_cast<long>(merged.size());
   unsigned workers = std::thread::hardware_concurrency();
   if (workers == 0) workers = 2;
@@ -273,12 +323,43 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
 
       int id;
       if (render) {
-        std::vector<std::int16_t> pcm = slice_pcm(stems[v], start, end);
+        const long tend = trim_end(stems[v], start, end);
+        std::vector<std::int16_t> pcm = slice_pcm(stems[v], start, tend);
         ++total_slices;
         std::string raw(reinterpret_cast<const char*>(pcm.data()),
                         pcm.size() * sizeof(std::int16_t));
         auto found = dedup.find(raw);
-        if (found == dedup.end()) {
+
+        // Byte-identical? Done. Otherwise, if asked, look for one that merely
+        // sounds the same.
+        int near = -1;
+        if (found == dedup.end() && tolerant) {
+          const long len = tend - start;
+          const double rms = slice_rms(stems[v], start, tend);
+          std::vector<Rep>& bucket = reps[{v, len}];
+          if (rms > 0.0) {
+            for (const Rep& r : bucket) {
+              // rms(a - b) >= |rms(a) - rms(b)|, so a big level difference
+              // cannot possibly come in under the tolerance -- skip the work.
+              const double floor_db =
+                  20.0 * std::log10(std::fabs(rms - r.rms) / rms + 1e-12);
+              if (floor_db >= tolerance) continue;
+              if (residual_db(stems[v], start, stems[v], r.start, len, rms) <
+                  tolerance) {
+                near = r.id;
+                break;
+              }
+            }
+          }
+          if (near < 0)
+            bucket.push_back({start, tend, rms, static_cast<int>(channels.size())});
+          else
+            ++merged_count;
+        }
+
+        if (near >= 0) {
+          id = near;
+        } else if (found == dedup.end()) {
           id = static_cast<int>(channels.size());
           std::string vn = sanitize(voice);
           if (vn.empty()) vn = "voice" + std::to_string(v + 1);
@@ -309,10 +390,15 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
 
   pool.finish();  // waits for the encoders; rethrows if any of them failed
 
-  if (render)
-    report(opts, "wrote " + std::to_string(channels.size()) +
-                     " unique keysounds from " + std::to_string(total_slices) +
-                     " slices");
+  if (render) {
+    std::string msg = "wrote " + std::to_string(channels.size()) +
+                      " unique keysounds from " + std::to_string(total_slices) +
+                      " slices";
+    if (tolerant)
+      msg += " (" + std::to_string(merged_count) + " merged as near-duplicates at " +
+             std::to_string(static_cast<int>(tolerance)) + " dB)";
+    report(opts, msg);
+  }
 
   std::vector<SoundChannel> used;
   for (SoundChannel& c : channels)

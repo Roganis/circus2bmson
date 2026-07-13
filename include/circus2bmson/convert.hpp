@@ -25,6 +25,20 @@ struct ConvertOptions {
   // channels. Empty -> $C2B_FURNACE, else "furnace" on PATH. Ignored by the
   // other backends.
   std::string furnace_path = "";
+  // Collapse keysounds that are not bit-identical but sound the same, given as
+  // dB below the signal: 40 merges slices whose difference is at most -40 dB
+  // (inaudible), 30 is more aggressive. 0 (the default) merges only byte-exact
+  // duplicates.
+  //
+  // Chip stems repeat a drum hit or a held note with a slightly different phase
+  // or envelope tail, so identical-sounding notes are rarely identical bytes --
+  // on a Genesis module, -40 dB removes ~13% of the keysounds and -30 dB ~24%.
+  // The cost is that consecutive keysounds are meant to butt together
+  // seamlessly, and substituting a near-match can put a small discontinuity at
+  // the seam; the looser the tolerance, the likelier that is to be audible.
+  //
+  // Only the stem backends (chip / .dmf / .fur) honour this.
+  double dedup_tolerance_db = 0.0;
   // Optional: called as the conversion moves through its slow stages, so a UI
   // can say what it is doing -- a long chip conversion spends minutes rendering
   // and encoding, and a silent "converting..." is indistinguishable from a

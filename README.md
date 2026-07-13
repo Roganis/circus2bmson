@@ -60,6 +60,15 @@ carry no note events at all, so their notes still have to be recovered from the
 audio (`onset.hpp`), with exactly the legato blindness described above, and the
 BPM is guessed. This is the tier to be suspicious of.
 
+**Chip songs produce a lot of keysounds**, because every note is sliced out of
+the rendered audio and so carries its own pitch, envelope state and effects —
+nothing can be reused the way a normal chart reuses one sample across many
+notes. A dense Genesis module runs to ~5 500. `--dedup-tolerance N` (GUI: *Merge
+keysounds*) collapses ones that differ by less than N dB: on that module, 40 dB
+(an inaudible difference) gives 5 045 → 4 434 and 30 dB gives 3 895. The catch
+is that consecutive keysounds are meant to butt together seamlessly, so
+substituting a near-match can leave a faint seam; byte-exact is the default.
+
 **Both chip tiers: keysounds do not sum back to the original mix.** These chips
 mix their channels *non-linearly* in hardware and the emulators model that
 faithfully, but a BMS player sums keysounds linearly. Measured residual of

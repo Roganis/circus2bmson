@@ -25,6 +25,9 @@ void print_usage(const char* argv0) {
       << "  --format FMT        keysound files: wav (default) | ogg\n"
       << "  --soundfont FILE    SoundFont (.sf2) for MIDI input\n"
       << "  --furnace FILE      Furnace binary, to render .dmf/.fur input\n"
+      << "  --dedup-tolerance N merge keysounds that differ by less than N dB\n"
+      << "                      (chip/.dmf/.fur; try 40, or 30 to be stricter;\n"
+      << "                      0 = byte-exact, the default)\n"
       << "  --max-loops N       times to unroll a looping section (default 1)\n"
       << "  --name-by WHICH     keysound names: channel (default) | instrument | lane\n"
       << "  --volume-ramping    keep libopenmpt's anti-click ramp (more keysounds)\n"
@@ -110,6 +113,17 @@ int main(int argc, char** argv) {
         return 2;
       }
       opts.furnace_path = argv[i];
+    } else if (a == "--dedup-tolerance") {
+      if (++i >= argc) {
+        std::cerr << "error: missing argument for " << a << "\n";
+        return 2;
+      }
+      opts.dedup_tolerance_db = std::atof(argv[i]);
+      if (opts.dedup_tolerance_db < 0.0 || opts.dedup_tolerance_db > 90.0) {
+        std::cerr << "error: --dedup-tolerance expects dB below the signal, "
+                     "e.g. 40 or 30 (0 = byte-exact)\n";
+        return 2;
+      }
     } else if (a == "--volume-ramping") {
       opts.volume_ramping = true;
     } else if (a == "--no-audio") {

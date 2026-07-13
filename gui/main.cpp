@@ -39,6 +39,7 @@ struct AppState {
   bool render_audio = true;
   int audio_format = 0;       // 0 = WAV, 1 = OGG
   int naming = 0;             // 0 = Channel, 1 = Instrument, 2 = Lane
+  int dedup = 0;              // 0 = exact, 1 = -40 dB, 2 = -30 dB
   int max_loops = 1;
   bool volume_ramping = false;
   bool honor_cc = true;       // apply the MIDI's own CC7/CC11 volume
@@ -173,6 +174,7 @@ void start_convert(AppState& s) {
                          : s.naming == 2 ? KeysoundNaming::Lane
                                          : KeysoundNaming::Channel;
   opts.max_loops = s.max_loops < 1 ? 1 : s.max_loops;
+  opts.dedup_tolerance_db = s.dedup == 1 ? 40.0 : s.dedup == 2 ? 30.0 : 0.0;
   opts.volume_ramping = s.volume_ramping;
   opts.soundfont_path = s.soundfont;  // used for MIDI input
   // Bake the live mixer settings into the keysounds; otherwise just honour the
@@ -278,6 +280,15 @@ void draw_ui(AppState& s) {
   ImGui::RadioButton("OGG", &s.audio_format, 1);
   ImGui::SetNextItemWidth(180);
   ImGui::Combo("Keysound names", &s.naming, "Channel\0Instrument\0Lane\0");
+  ImGui::Combo("Merge keysounds", &s.dedup,
+               "Identical only\0Sounding the same (-40 dB)\0"
+               "Sounding close (-30 dB)\0");
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip(
+        "Chip and .dmf/.fur only. A repeated drum hit or held note is rarely\n"
+        "byte-identical (the phase differs), so exact matching leaves lots of\n"
+        "duplicates. Looser merging means fewer keysounds, but a near-match\n"
+        "substituted into a run of notes can leave a faint seam.");
   ImGui::Checkbox("Volume ramping (libopenmpt smoothing; more keysounds)",
                   &s.volume_ramping);
   ImGui::EndDisabled();
