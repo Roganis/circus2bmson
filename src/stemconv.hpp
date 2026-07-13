@@ -18,6 +18,11 @@
 // it lives here once.
 namespace circus2bmson {
 
+// Say what we are doing, if anyone is listening.
+inline void report(const ConvertOptions& opts, const std::string& message) {
+  if (opts.on_progress) opts.on_progress(message);
+}
+
 struct StemSong {
   std::string title;
   std::string format;                     // "nsf", "vgm", "dmf", "fur", ...

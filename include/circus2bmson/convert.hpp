@@ -2,6 +2,7 @@
 #define CIRCUS2BMSON_CONVERT_HPP
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,13 @@ struct ConvertOptions {
   // channels. Empty -> $C2B_FURNACE, else "furnace" on PATH. Ignored by the
   // other backends.
   std::string furnace_path = "";
+  // Optional: called as the conversion moves through its slow stages, so a UI
+  // can say what it is doing -- a long chip conversion spends minutes rendering
+  // and encoding, and a silent "converting..." is indistinguishable from a
+  // hang. Invoked from the converting thread (and, during the Furnace render,
+  // from a watcher thread), so it must tolerate being called off the UI thread.
+  // ProgressFn comes from render.hpp. May be null.
+  ProgressFn on_progress;
   // For MIDI input: per-channel / per-instrument gains and whether to honour
   // the file's own volume/expression controllers. Baked into the keysounds.
   // Ignored by the tracker backends.

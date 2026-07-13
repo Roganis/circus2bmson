@@ -182,6 +182,13 @@ void start_convert(AppState& s) {
   else
     opts.midi_mix.honor_cc = s.honor_cc;
 
+  // Chip conversions run for minutes (Furnace renders every channel as its own
+  // playback pass), so stream the stages into the log instead of leaving a
+  // silent "converting..." that looks like a hang. log_line takes the mutex, so
+  // it is safe to call from the worker and from Furnace's watcher thread.
+  AppState* sp = &s;
+  opts.on_progress = [sp](const std::string& m) { log_line(*sp, m); };
+
   s.busy = true;
   log_line(s, "converting " + std::string(s.input) + " ...");
   std::thread(convert_worker, &s, std::string(s.input), std::move(opts)).detach();

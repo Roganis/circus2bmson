@@ -1,7 +1,9 @@
 #include "circus2bmson/furnace.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -10,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #ifndef _WIN32
@@ -153,7 +156,36 @@ StemSong render_stems(const std::string& bin, const std::string& input_path,
       << " -output " << quote((tmp.path / "out.wav").string()) << " "
       << quote(input.string()) << " > " << quote(log.string()) << " 2>&1";
 
+  report(opts, "rendering chip channels with Furnace (a long song takes a "
+                "while -- each channel is a separate playback pass)...");
+
+  // Furnace renders one channel per pass and writes each file as it finishes,
+  // so watching the directory fill up is the only progress signal available
+  // from a subprocess. The count is all we can report -- the channel total is
+  // not known until it is done.
+  std::atomic<bool> done{false};
+  std::thread watcher;
+  if (opts.on_progress) {
+    watcher = std::thread([&] {
+      int seen = 0;
+      while (!done.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        int n = 0;
+        std::error_code ec;
+        for (const auto& e : fs::directory_iterator(tmp.path, ec))
+          if (e.path().extension() == ".wav") ++n;
+        if (n > seen && !done.load()) {
+          seen = n;
+          report(opts, "  ...rendered channel " + std::to_string(seen));
+        }
+      }
+    });
+  }
+
   const int rc = std::system(cmd.str().c_str());
+  done.store(true);
+  if (watcher.joinable()) watcher.join();
+
   if (rc != 0)
     throw std::runtime_error("furnace export failed (exit " +
                              std::to_string(exit_code(rc)) + ")" +
@@ -194,6 +226,12 @@ StemSong render_stems(const std::string& bin, const std::string& input_path,
   song.total_frames = static_cast<long>(longest / 2);
   song.format = lower(fs::path(input_path).extension().string());
   if (!song.format.empty() && song.format[0] == '.') song.format.erase(0, 1);
+
+  char msg[128];
+  std::snprintf(msg, sizeof(msg), "Furnace rendered %zu channels (%.1f s)",
+                song.stems.size(),
+                static_cast<double>(song.total_frames) / song.sample_rate);
+  report(opts, msg);
   return song;
 }
 

@@ -55,6 +55,7 @@ ConvertResult convert_mod_file(const std::string& input_path,
   if (chip_handles_extension(ext))
     return convert_chip(bytes, input_path, opts);
 
+  if (opts.on_progress) opts.on_progress("reading the score...");
   const Score score = read_score(bytes, opts.max_loops);
 
   namespace fs = std::filesystem;
@@ -80,9 +81,14 @@ ConvertResult convert_mod_file(const std::string& input_path,
   std::string doc;
   if (opts.render_audio) {
     const std::string dir = out_dir.empty() ? "." : out_dir.string();
+    if (opts.on_progress)
+      opts.on_progress("rendering " + std::to_string(score.channels) +
+                       " channels and slicing " +
+                       std::to_string(score.notes.size()) + " keysounds...");
     const RenderResult rr =
         render_keysounds(bytes, score, dir, opts.keysound_naming,
-                         opts.volume_ramping, opts.audio_format);
+                         opts.volume_ramping, opts.audio_format,
+                         opts.on_progress);
 
     std::vector<SoundChannel> channels(rr.keysound_names.size());
     for (std::size_t i = 0; i < channels.size(); ++i)

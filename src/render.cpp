@@ -160,7 +160,7 @@ void write_wav(const std::string& path, const std::vector<std::int16_t>& pcm,
 RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes_u8,
                               const Score& score, const std::string& out_dir,
                               KeysoundNaming naming, bool volume_ramping,
-                              AudioFormat format) {
+                              AudioFormat format, const ProgressFn& progress) {
   const std::vector<char> bytes(bytes_u8.begin(), bytes_u8.end());
   RenderResult rr;
   rr.sample_rate = score.sample_rate;
@@ -177,6 +177,11 @@ RenderResult render_keysounds(const std::vector<std::uint8_t>& bytes_u8,
     for (std::size_t i = 0; i < score.notes.size(); ++i)
       if (score.notes[i].channel == c) idx.push_back(i);
     if (idx.empty()) continue;
+
+    if (progress)
+      progress("  ...channel " + std::to_string(c + 1) + "/" +
+               std::to_string(score.channels) + "  (" +
+               std::to_string(idx.size()) + " notes)");
 
     const std::vector<float> stem =
         render_channel(bytes, c, score, volume_ramping);

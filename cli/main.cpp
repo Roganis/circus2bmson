@@ -134,6 +134,10 @@ int main(int argc, char** argv) {
     opts.output_dir = (in.parent_path() / in.stem()).string();
   }
 
+  // Chip conversions take minutes; say what is happening. On stderr so the
+  // result summary on stdout stays pipeable.
+  opts.on_progress = [](const std::string& m) { std::cerr << m << "\n"; };
+
   try {
     const circus2bmson::ConvertResult r =
         circus2bmson::convert_mod_file(input, opts);

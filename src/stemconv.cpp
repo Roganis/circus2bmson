@@ -109,6 +109,8 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
   const std::vector<std::vector<float>>& stems = song.stems;
 
   // Onsets per voice, plus a merged list for BPM inference.
+  report(opts, "detecting note onsets in " + std::to_string(stems.size()) +
+                   " channels...");
   std::vector<std::vector<long>> onsets(stems.size());
   std::vector<double> merged;
   for (std::size_t v = 0; v < stems.size(); ++v) {
@@ -117,6 +119,7 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
     for (long f : onsets[v]) merged.push_back(static_cast<double>(f) / rate);
   }
   std::sort(merged.begin(), merged.end());
+  report(opts, "found " + std::to_string(merged.size()) + " notes");
 
   constexpr int kResolution = 480;
   const double bpm = infer_bpm(merged);
@@ -136,6 +139,14 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
   long total_slices = 0, note_count = 0;
   const bool render = opts.render_audio;
 
+  const long expected = static_cast<long>(merged.size());
+  if (render)
+    report(opts, "slicing and encoding " + std::to_string(expected) +
+                     " keysounds (" +
+                     (opts.audio_format == AudioFormat::Ogg ? "ogg" : "wav") +
+                     ")...");
+  long next_tick = 0;  // report roughly every 10%
+
   for (std::size_t v = 0; v < stems.size(); ++v) {
     const long n = static_cast<long>(stems[v].size() / 2);
     const std::string& voice = song.voice_names[v];
@@ -146,6 +157,14 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
       if (end <= start) continue;
       ++note_count;
       const long pulse = pulse_at(start);
+
+      if (render && expected > 0 && note_count >= next_tick) {
+        const int pct = static_cast<int>(100 * note_count / expected);
+        report(opts, "  ...keysound " + std::to_string(note_count) + "/" +
+                         std::to_string(expected) + "  (" +
+                         std::to_string(pct) + "%)");
+        next_tick = note_count + expected / 10 + 1;
+      }
 
       int id;
       if (render) {
@@ -186,6 +205,11 @@ ConvertResult convert_stems(const StemSong& song, const std::string& input_path,
       channels[id].note_pulses.push_back(pulse);
     }
   }
+
+  if (render)
+    report(opts, "wrote " + std::to_string(channels.size()) +
+                     " unique keysounds from " + std::to_string(total_slices) +
+                     " slices");
 
   std::vector<SoundChannel> used;
   for (SoundChannel& c : channels)
