@@ -18,6 +18,9 @@ option(C2B_BUILD_TESTS "Enable tests (ctest)"                  ON)
 # OFF by default so the headless library/CLI build (and BmsTWO embedding) stay
 # free of GUI dependencies; enable with -DC2B_BUILD_GUI=ON (needs GLFW).
 option(C2B_BUILD_GUI   "Build the circus2bmson GUI (Dear ImGui)" OFF)
+# OFF by default so local builds without libgme still work (chip backend stubs
+# out); CI turns this ON so published binaries can't silently lose chip support.
+option(C2B_REQUIRE_GME "Fail configure if game-music-emu is not found" OFF)
 
 # ---------------------------------------------------------------------------
 # Dependencies
@@ -26,11 +29,17 @@ option(C2B_BUILD_GUI   "Build the circus2bmson GUI (Dear ImGui)" OFF)
 # ---------------------------------------------------------------------------
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBOPENMPT REQUIRED IMPORTED_TARGET libopenmpt)
+# zlib: DefleMask .dmf modules are whole-file zlib streams.
+pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
 pkg_check_modules(VORBISENC REQUIRED IMPORTED_TARGET vorbisenc vorbis ogg)
 pkg_check_modules(FLUIDSYNTH REQUIRED IMPORTED_TARGET fluidsynth)
 # Optional: game-music-emu (chip formats -- NSF/GBS/VGM/SPC/...). When found the
 # chip backend is compiled in; otherwise it builds as a stub.
-pkg_check_modules(LIBGME IMPORTED_TARGET libgme)
+if(C2B_REQUIRE_GME)
+  pkg_check_modules(LIBGME REQUIRED IMPORTED_TARGET libgme)
+else()
+  pkg_check_modules(LIBGME IMPORTED_TARGET libgme)
+endif()
 
 add_library(c2b_vendor INTERFACE)
 target_include_directories(c2b_vendor INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/third_party)

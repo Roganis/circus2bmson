@@ -14,9 +14,11 @@
 
 #include "circus2bmson/bmson.hpp"
 #include "circus2bmson/chip.hpp"
+#include "circus2bmson/furnace.hpp"
 #include "circus2bmson/render.hpp"
 #include "circus2bmson/score.hpp"
 #include "chipconv.hpp"
+#include "furnaceconv.hpp"
 #include "midiconv.hpp"
 
 namespace circus2bmson {
@@ -41,6 +43,12 @@ ConvertResult convert_mod_file(const std::string& input_path,
   for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   if (ext == ".mid" || ext == ".midi")
     return convert_midi(bytes, input_path, opts);
+
+  // Chiptune trackers (.dmf/.fur) need chip emulation to play: the Furnace
+  // binary renders their channels for us (see furnace.hpp). Runtime dependency,
+  // so this dispatches unconditionally and fails with an install hint.
+  if (furnace_handles_extension(ext))
+    return convert_furnace(bytes, input_path, opts);
 
   // Chip-music formats (NSF/GBS/VGM/...) need the libgme backend; libopenmpt
   // can't read them. Only dispatched here when libgme was built in.
@@ -114,6 +122,9 @@ std::vector<std::string> supported_input_extensions() {
   exts.emplace_back("mid");
   exts.emplace_back("midi");
   for (const std::string& e : chip_extensions()) exts.push_back(e);  // {} w/o libgme
+  // Furnace is a runtime dependency, so .dmf/.fur are always advertised; a
+  // conversion without the binary installed fails with an install hint.
+  for (const std::string& e : furnace_extensions()) exts.push_back(e);
   std::sort(exts.begin(), exts.end());
   exts.erase(std::unique(exts.begin(), exts.end()), exts.end());
   return exts;

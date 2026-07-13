@@ -38,16 +38,39 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libopenmpt-dev libvorbis-dev libfluidsynth-dev \
             timgm6mb-soundfont libglfw3-dev libgl1-mesa-dev libgme-dev patchelf \
-            file cmake ninja-build
+            zlib1g-dev libsdl2-2.0-0 file cmake ninja-build
+
+      # Furnace renders the chip channels for .dmf/.fur input (runtime
+      # dependency -- see furnace.hpp). Without it test_furnace silently skips,
+      # which is exactly the coverage hole C2B_REQUIRE_GME exists to prevent for
+      # libgme, so install it here rather than let that happen. Ubuntu only
+      # packages furnace from 25.10 and ubuntu-latest is older, so fall back to
+      # the upstream release tarball.
+      - name: Install Furnace (.dmf/.fur backend)
+        run: |
+          if ! sudo apt-get install -y furnace; then
+            echo "furnace not in apt; using the upstream release tarball"
+            curl -sSL -o furnace.tar.gz \
+              https://github.com/tildearrow/furnace/releases/download/v${FURNACE_VERSION}/furnace-${FURNACE_VERSION}-linux-x86_64.tar.gz
+            tar -xzf furnace.tar.gz
+            sudo install -m755 furnace/furnace /usr/local/bin/furnace
+          fi
+          furnace -version | head -2
+        env:
+          FURNACE_VERSION: 0.6.8.3
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DC2B_BUILD_GUI=ON
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DC2B_BUILD_GUI=ON -DC2B_REQUIRE_GME=ON
 
       - name: Build
         run: cmake --build build
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+        env:
+          # Furnace is installed above, so a skip here would mean the .dmf/.fur
+          # backend went untested. Make that a failure instead.
+          C2B_REQUIRE_FURNACE: 1
 
       - name: Build AppImage
         run: |
@@ -103,7 +126,7 @@ jobs:
             mingw-w64-ucrt-x86_64-libgme
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DC2B_BUILD_GUI=ON
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DC2B_BUILD_GUI=ON -DC2B_REQUIRE_GME=ON
 
       - name: Build
         run: cmake --build build

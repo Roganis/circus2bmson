@@ -20,6 +20,10 @@ struct ConvertOptions {
   // For MIDI input: user-supplied SoundFont replacing the bundled default.
   // Ignored by the tracker backends.
   std::string soundfont_path = "";
+  // For .dmf/.fur input: path to the Furnace binary that renders the chip
+  // channels. Empty -> $C2B_FURNACE, else "furnace" on PATH. Ignored by the
+  // other backends.
+  std::string furnace_path = "";
   // For MIDI input: per-channel / per-instrument gains and whether to honour
   // the file's own volume/expression controllers. Baked into the keysounds.
   // Ignored by the tracker backends.

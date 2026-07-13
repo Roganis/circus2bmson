@@ -3,6 +3,8 @@
 #   render.cpp   per-channel keysound rendering + dedup (WAV via dr_wav,
 #                OGG via libvorbis)
 #   bmson.cpp    bmson document emission
+#   stemconv.cpp shared back half of the audio-domain backends: stems ->
+#                onsets -> keysounds -> bmson (used by chip.cpp and furnace.cpp)
 #   mod.cpp / timeline.cpp   independent MOD parser + sequencer, kept as a
 #                validation oracle for the generic path (see tests)
 add_library(circus2bmson
@@ -17,7 +19,9 @@ add_library(circus2bmson
   bmson.cpp
   render.cpp
   onset.cpp
+  stemconv.cpp
   chip.cpp
+  furnace.cpp
   oggenc.cpp
   dr_wav_impl.cpp
   convert.cpp

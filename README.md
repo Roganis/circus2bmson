@@ -3,7 +3,9 @@
 Convert vintage tracker music into [bmson](https://bmson-spec.readthedocs.io/),
 the JSON chart format for BMS. Accepts **any format libopenmpt plays** — MOD
 (ProTracker & variants), XM, S3M, IT, and dozens more — plus **General MIDI**
-(`.mid`/`.midi`), rendered through a SoundFont with FluidSynth.
+(`.mid`/`.midi`), rendered through a SoundFont with FluidSynth, **chip music**
+(NSF/GBS/VGM/SPC/… via game-music-emu) and **chiptune trackers** (DefleMask
+`.dmf`, Furnace `.fur`), rendered by the Furnace tracker.
 
 The output is a standard bmson folder with every note placed on the **BGM lane
 (`x: 0`)** so the result plays back like the original module and can then be
@@ -31,6 +33,33 @@ Timing stays on a **musical pulse grid** (resolution 240, one tracker row =
 row duration, and the measured duration otherwise — so pattern delay and tempo
 slides keep the grid exactly aligned with the rendered audio.
 
+## Two tiers of fidelity
+
+Backends fall into two groups, and it is worth knowing which one your file is in.
+
+**Exact tier — libopenmpt (MOD/XM/S3M/IT/…) and MIDI.** The score is read from
+the file's own note events, so keysounds are sliced at the exact onsets and the
+pulse grid is the module's real tempo. Reconstruction is gated in CI at ~-80 dB.
+
+**Inferred tier — chip files (NSF/GBS/VGM/… via libgme) and chiptune trackers
+(`.dmf`/`.fur` via Furnace).** Each voice is rendered in isolation and the notes
+are *recovered from the audio* by onset detection, because the register-dump
+formats carry no note events (and, for now, because we do not parse `.dmf`
+pattern data yet). Two consequences, both inherent rather than bugs:
+
+- **Legato is invisible.** A square wave gliding from pitch to pitch with no
+  amplitude dip has no onset to detect, so those notes are missed. Chip music
+  does this constantly.
+- **Keysounds do not sum back to the original mix.** These chips mix their
+  channels *non-linearly* in hardware and the emulators model that faithfully,
+  but a BMS player sums keysounds linearly. Measured residual of
+  sum-of-stems vs. the real mix: Amiga -55 dB (linear mixer), PC Engine -33 dB,
+  Game Boy -13 dB, NES -11 dB, Genesis/YM2612 -7 dB. So a Genesis chart is a
+  faithful *re-performance*, not a bit-exact reproduction.
+
+Parsing `.dmf` natively will lift it into the exact tier for the note/timing
+half; the mixing caveat is a property of the hardware and stays.
+
 ## Status — roadmap
 
 - [x] **M0** — CMake project (library + CLI + tools), vendored deps, Linux CI.
@@ -51,26 +80,42 @@ slides keep the grid exactly aligned with the rendered audio.
 - [x] **Sub-row precision** — the note-delay effect (EDx on MOD/XM, SDx on
       S3M/IT) places a note part-way into its row, in both pulses and the
       keysound's onset frame, so off-beat notes land correctly.
-- [ ] **Chip formats (game-music-emu)** — spike in place: libgme renders each
-      chip voice in isolation and `scan_chip` recovers note onsets from the
-      audio (audio-domain detection). Next: onsets -> keysounds on a pulse grid
-      -> bmson, then a backend dispatch by extension.
+- [x] **Chip formats (game-music-emu)** — libgme renders each chip voice in
+      isolation, onsets are recovered from the audio (audio-domain detection),
+      and the shared stem path turns them into keysounds on a pulse grid.
+- [ ] **Chiptune trackers (`.dmf` / `.fur`)** — step 1 in place: the Furnace
+      binary renders each chip channel (`-outmode perchan`) and the same
+      audio-domain path takes over, so these currently sit in the inferred tier
+      (see below). Next: parse `.dmf` natively for an *exact* score — notes and
+      row timing come straight from the pattern data, no detection, no guessed
+      BPM. See `include/circus2bmson/furnace.hpp`.
 - [ ] **M4** — remaining refinements: macOS CI. (Windows CI + prebuilt `.exe`
       artifact: done.)
 
 ## Building
 
-Requires a C++17 compiler, CMake ≥ 3.16, libopenmpt, libvorbis and FluidSynth
-(for MIDI). game-music-emu (libgme) is optional and enables the chip-music
-backend (NSF/GBS/VGM/...).
+Requires a C++17 compiler, CMake ≥ 3.16, libopenmpt, libvorbis, zlib and
+FluidSynth (for MIDI). game-music-emu (libgme) is optional and enables the
+chip-music backend (NSF/GBS/VGM/...).
+
+**Furnace** (for `.dmf`/`.fur`) is a *runtime* dependency, not a build one: the
+converter shells out to the `furnace` binary to render the module's channels.
+It is GPL-2.0-or-later with no library target, so invoking the binary — rather
+than linking it — keeps this project's licensing independent of it. Install it
+(`pacman -S furnace`, `apt install furnace`, or
+[tildearrow.org/furnace](https://tildearrow.org/furnace/)) and put it on `PATH`,
+or point at it with `$C2B_FURNACE` / `--furnace <path>`. Without it, `.dmf` and
+`.fur` conversions fail with an install hint; everything else is unaffected.
 
 ```sh
 # Debian/Ubuntu
 sudo apt-get install -y libopenmpt-dev libvorbis-dev libfluidsynth-dev \
-  libgme-dev cmake ninja-build
+  libgme-dev zlib1g-dev cmake ninja-build
+sudo apt-get install -y furnace      # optional: .dmf / .fur
 # Arch
-sudo pacman -S --needed libopenmpt libvorbis fluidsynth game-music-emu \
+sudo pacman -S --needed libopenmpt libvorbis fluidsynth game-music-emu zlib \
   cmake ninja gcc
+sudo pacman -S --needed furnace      # optional: .dmf / .fur
 cmake -S . -B build -G Ninja
 cmake --build build
 ctest --test-dir build --output-on-failure

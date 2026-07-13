@@ -93,6 +93,16 @@ target_compile_definitions(test_chip PRIVATE
   C2B_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/test_out")
 add_test(NAME chip COMMAND test_chip)
 
+# Furnace backend: hand-build a DefleMask .dmf, render its channels with the
+# Furnace binary, detect onsets, convert to bmson. Self-skips when Furnace is
+# not installed (it is a runtime dependency, found on PATH / $C2B_FURNACE).
+add_executable(test_furnace test_furnace.cpp)
+target_link_libraries(test_furnace
+  PRIVATE circus2bmson::circus2bmson PkgConfig::ZLIB)
+target_compile_definitions(test_furnace PRIVATE
+  C2B_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}/test_out")
+add_test(NAME furnace COMMAND test_furnace)
+
 # Input format advertising: libopenmpt extensions + MIDI, sorted/unique.
 add_executable(test_supported_formats test_supported_formats.cpp)
 target_link_libraries(test_supported_formats PRIVATE circus2bmson::circus2bmson)
